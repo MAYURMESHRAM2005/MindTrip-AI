@@ -17,7 +17,7 @@ root/
 ## ⚡ Highlights
 
 - **Real authentication** — JWT access tokens (memory) + rotating refresh tokens (httpOnly cookies), bcrypt password hashing, email verification, forgot/reset password, Google OAuth, RBAC (`user` / `admin`).
-- **Multi-Agent LLM architecture** — Orchestrator, User Preference, Destination, Budget, Flight, Train, Bus, Hotel, Restaurant, Attraction, Weather, Traffic, Local Guide, Safety, Expense, Translation, Final Validator. External-data agents fetch **real data first** (Amadeus, Google Places/Maps, OpenWeatherMap) and Gemini only *reasons* over it.
+- **Multi-Agent LLM architecture** — Orchestrator, User Preference, Destination, Budget, Flight, Train, Bus, Hotel, Restaurant, Attraction, Weather, Traffic, Local Guide, Safety, Expense, Translation, Final Validator. External-data agents fetch **real data first** (Amadeus, Geoapify Places, OpenWeatherMap) and Gemini only *reasons* over it.
 - **Deterministic Budget Optimizer** — allocation and optimization are plain arithmetic (tested), not LLM guesswork. Drops low-priority items and reduces flexible costs when over budget, showing original vs optimized vs saved.
 - **Final Validator Agent** — verifies budget ≤ limit, date consistency, time overlaps, hotel/transport/restaurant fit, and that estimates/live data are correctly labelled.
 - **Everything else** — interactive Leaflet maps with traffic-aware routes, hotels, flights, trains, buses, restaurants, weather, contextual chatbot that really edits your trip, voice assistant, image search, expense tracker with charts, PWA offline itinerary, emergency center, QR ticket wallet, PDF itinerary, multi-language (en/hi/mr), and a full admin dashboard.
@@ -39,7 +39,7 @@ User Request
 │  EXTERNAL-DATA AGENTS (real providers FIRST)             │
 │  Flight → Amadeus        Hotel → Amadeus                 │
 │  Train/Bus → configured API   Weather → OpenWeatherMap   │
-│  Restaurant/Attraction → Google Places   Traffic → Maps  │
+│  Restaurant/Attraction → Geoapify Places   Traffic → Geoapify │
 ├─────────────────────────────────────────────────────────┤
 │ Budget Agent (deterministic math + AI reasoning)         │
 │ Itinerary Builder (deterministic day-by-day schedule)    │
@@ -68,7 +68,7 @@ Validated Trip + Itinerary (persisted in MongoDB)
 | Backend | Node 18+, Express, Mongoose, JWT, bcryptjs, cookie-parser, helmet, cors, express-rate-limit, compression, morgan, Joi, multer, nodemailer, pdfkit, @google/generative-ai, node:test + supertest |
 | Database | MongoDB (local or Atlas) |
 | AI | Google Gemini **3.5 Flash** (`gemini-3.5-flash` default, configurable via `GEMINI_MODEL`) |
-| APIs | Amadeus (flights/hotels), Google Places & Maps, OpenWeatherMap, open.er-api.com (FX), configurable train/bus endpoints |
+| APIs | Amadeus (flights/hotels), Geoapify (geocoding, routing, places), OpenWeatherMap, open.er-api.com (FX), configurable train/bus endpoints |
 
 ---
 
@@ -78,7 +78,7 @@ Validated Trip + Itinerary (persisted in MongoDB)
 - MongoDB (local `mongod` or Atlas cluster) — *or* let the integration tests spin up `mongodb-memory-server`
 - Optional API keys (the app degrades gracefully without them):
   - **Google AI Studio** → `GEMINI_API_KEY` (required for AI features)
-  - **Google Cloud Console** → `GOOGLE_MAPS_API_KEY`, `GOOGLE_CLIENT_ID/SECRET`
+  - **Geoapify** → `GEOAPIFY_API_KEY` (backend only — the frontend never holds keys)
   - **OpenWeatherMap** → `OPENWEATHER_API_KEY`
   - **Amadeus for Developers** → `AMADEUS_CLIENT_ID/SECRET`
 
@@ -125,8 +125,8 @@ npm start                # runs the backend (serve frontend/dist with any static
 | `MONGODB_URI` | MongoDB connection string |
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Signing secrets (min 32 chars) |
 | `GEMINI_API_KEY` | Google Gemini API key |
-| `GOOGLE_MAPS_API_KEY` | Places, Geocoding, Directions, Distance Matrix |
-| `OPENWEATHER_API_KEY` | Weather |
+| `GEOAPIFY_API_KEY` | Geocoding, Routing, Places (server-side agents & endpoints) |
+| `OPENWEATHER_API_KEY` | Weather (server-side proxy) |
 | `AMADEUS_CLIENT_ID` / `AMADEUS_CLIENT_SECRET` | Flights & hotels |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
 | `TRAIN_API_URL` / `TRAIN_API_KEY` | Optional configured train provider |
@@ -134,7 +134,7 @@ npm start                # runs the backend (serve frontend/dist with any static
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Verification/reset emails |
 | `FRONTEND_URL` | CORS whitelist + email links |
 
-**Never commit `.env`.** Frontend secrets are never used — all secret calls go through the backend.
+**Never commit `.env`.** All API keys live **only in `backend/.env`** (`GEOAPIFY_API_KEY`, `OPENWEATHER_API_KEY`, `AMADEUS_*`, etc.). The frontend never holds keys and never calls external APIs directly — every request goes through the backend, which proxies Geoapify, OpenWeatherMap and future providers via `/api/geocode`, `/api/routes`, `/api/maps`, `/api/weather`, `/api/restaurants`, `/api/hotels`.
 
 ---
 
@@ -155,7 +155,7 @@ Models: `User`, `RefreshToken`, `UserPreference`, `Trip`, `Itinerary`, `Itinerar
 | Provider | Where | Docs |
 | --- | --- | --- |
 | Gemini | [Google AI Studio](https://aistudio.google.com/app/apikey) | [Generative AI docs](https://ai.google.dev/gemini-api/docs) |
-| Google Maps/Places | [Google Cloud Console](https://console.cloud.google.com) → enable *Maps JavaScript, Geocoding, Directions, Places* APIs | [Maps Platform](https://developers.google.com/maps/documentation) |
+| Geoapify | [myprojects.geoapify.com](https://myprojects.geoapify.com) → create a key; use a referrer-restricted browser key for the frontend | [Geoapify docs](https://apidocs.geoapify.com) |
 | OpenWeatherMap | [openweathermap.org](https://home.openweathermap.org/api_keys) | [Weather API](https://openweathermap.org/api) |
 | Amadeus | [Amadeus for Developers](https://developers.amadeus.com) — free test credentials | [Flight Offers](https://developers.amadeus.com/self-service/category/flights) |
 | Google OAuth | [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) | [OAuth 2.0](https://developers.google.com/identity/protocols/oauth2) |

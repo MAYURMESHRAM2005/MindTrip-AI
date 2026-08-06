@@ -24,7 +24,7 @@ export default function Hotels() {
 
   return (
     <div>
-      <PageHeader icon={Hotel} title="Hotels" subtitle="Live offers from Amadeus, with Google Places fallback." />
+      <PageHeader icon={Hotel} title="Hotels" subtitle="Live offers from Amadeus, with Geoapify Places fallback." />
 
       <div className="card mb-6 p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -53,7 +53,7 @@ export default function Hotels() {
       {data?.isLive && (
         <div className="space-y-3">
           <p className="text-xs font-semibold text-emerald-600">
-            ● {data.provider === 'amadeus' ? 'Live offers from Amadeus' : 'Live listings from Google Places'}
+            ● {data.provider === 'amadeus' ? 'Live offers from Amadeus' : 'Live listings from Geoapify Places'}
             {data.note && <span className="text-slate-400"> · {data.note}</span>}
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

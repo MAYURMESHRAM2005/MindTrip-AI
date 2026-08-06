@@ -1,3 +1,5 @@
+import axios from 'axios';
+
 /**
  * Every provider returns a normalized result:
  * { success, isLive, data, message, source, providerConfigured }
@@ -28,21 +30,34 @@ export function live(source, data, message = 'Live data') {
 }
 
 /**
- * fetch with timeout so a dead provider never hangs the pipeline.
+ * Shared axios instance — all external provider calls go through the backend.
+ * A dead provider never hangs the pipeline thanks to the request timeout.
  */
-export async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`${res.status} ${res.statusText} ${text.slice(0, 200)}`);
-    }
-    return res;
-  } finally {
-    clearTimeout(timer);
+const http = axios.create({ timeout: 10000 });
+
+/**
+ * GET with axios. Accepts either (url, params, timeoutMs) for simple calls or
+ * (url, params, config, timeoutMs) when headers/options are needed.
+ */
+export async function axiosGet(url, params = {}, config = {}, timeoutMs = 10000) {
+  if (typeof config === 'number') {
+    timeoutMs = config;
+    config = {};
   }
+  const { data } = await http.get(url, { params, ...config, timeout: timeoutMs });
+  return data;
 }
 
-export default { unavailable, live, fetchWithTimeout };
+/**
+ * POST with axios. Accepts either (url, body, timeoutMs) for simple calls or
+ * (url, body, config, timeoutMs) when headers/options are needed.
+ */
+export async function axiosPost(url, body = null, config = {}, timeoutMs = 10000) {
+  if (typeof config === 'number') {
+    timeoutMs = config;
+    config = {};
+  }
+  const { data } = await http.post(url, body, { ...config, timeout: timeoutMs });
+  return data;
+}
+export default { unavailable, live, axiosGet, axiosPost };

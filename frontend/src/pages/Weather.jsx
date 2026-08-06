@@ -1,13 +1,23 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CloudSun, Search, Droplets, Wind, Umbrella, ThermometerSun } from 'lucide-react';
+import { CloudSun, Search, Droplets, Wind, Umbrella, ThermometerSun, Gauge, Eye, Sunrise, Sunset } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Input } from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import ProviderNotice from '../components/ProviderNotice';
-import { weatherApi } from '../services/apiClient';
 import { Spinner } from '../components/ui/Spinner';
 import { formatDate } from '../utils/format';
+import { getCurrentWeather, getForecast, formatSunTime, weatherIconUrl } from '../services/weatherService';
+
+function Stat({ icon: Icon, color, label, value }) {
+  return (
+    <div className="rounded-xl bg-white/10 p-3 text-center">
+      <Icon className={`mx-auto h-5 w-5 ${color}`} />
+      <p className="mt-1 text-xs text-brand-100">{label}</p>
+      <p className="font-bold">{value}</p>
+    </div>
+  );
+}
 
 export default function Weather() {
   const [city, setCity] = useState('');
@@ -15,12 +25,12 @@ export default function Weather() {
 
   const { data: current } = useQuery({
     queryKey: ['weather-current', search],
-    queryFn: () => weatherApi.current({ city: search }).then((r) => r.data.data),
+    queryFn: () => getCurrentWeather({ city: search }),
     enabled: Boolean(search),
   });
   const { data: forecast, isLoading } = useQuery({
     queryKey: ['weather-forecast', search],
-    queryFn: () => weatherApi.forecast({ city: search }).then((r) => r.data.data),
+    queryFn: () => getForecast({ city: search }),
     enabled: Boolean(search),
   });
 
@@ -41,39 +51,34 @@ export default function Weather() {
       {!isLoading && !live && (
         <ProviderNotice
           title="Live weather data unavailable"
-          message={current?.message || 'OpenWeather API key not configured.'}
+          message={current?.message || 'Live weather is temporarily unavailable.'}
           externalSources={[{ name: 'OpenWeatherMap', url: 'https://openweathermap.org' }, { name: 'AccuWeather', url: 'https://www.accuweather.com' }]}
         />
       )}
 
       {live && w && (
         <>
-          <div className="card mb-6 flex flex-wrap items-center justify-between gap-6 bg-gradient-to-br from-brand-600 to-brand-900 p-6 text-white">
-            <div>
-              <p className="text-sm font-semibold text-brand-100">{w.city}, {w.country}</p>
-              <p className="mt-1 text-5xl font-extrabold">{Math.round(w.temp)}°C</p>
-              <p className="mt-1 text-brand-100">{w.description}</p>
-            </div>
-            <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
-              <div className="rounded-xl bg-white/10 p-3 text-center">
-                <ThermometerSun className="mx-auto h-5 w-5 text-amber-300" />
-                <p className="mt-1 text-xs text-brand-100">Feels like</p>
-                <p className="font-bold">{Math.round(w.feelsLike)}°C</p>
+          <div className="card mb-6 bg-gradient-to-br from-brand-600 to-brand-900 p-6 text-white">
+            <div className="flex flex-wrap items-center justify-between gap-6">
+              <div className="flex items-center gap-4">
+                {w.icon && (
+                  <img src={weatherIconUrl(w.icon)} alt={w.description} className="h-20 w-20 drop-shadow-lg" loading="lazy" />
+                )}
+                <div>
+                  <p className="text-sm font-semibold text-brand-100">{w.city}, {w.country}</p>
+                  <p className="mt-1 text-5xl font-extrabold">{Math.round(w.temp)}°C</p>
+                  <p className="mt-1 capitalize text-brand-100">{w.description}</p>
+                </div>
               </div>
-              <div className="rounded-xl bg-white/10 p-3 text-center">
-                <Droplets className="mx-auto h-5 w-5 text-sky-300" />
-                <p className="mt-1 text-xs text-brand-100">Humidity</p>
-                <p className="font-bold">{w.humidity}%</p>
-              </div>
-              <div className="rounded-xl bg-white/10 p-3 text-center">
-                <Wind className="mx-auto h-5 w-5 text-teal-300" />
-                <p className="mt-1 text-xs text-brand-100">Wind</p>
-                <p className="font-bold">{w.windSpeed} m/s</p>
-              </div>
-              <div className="rounded-xl bg-white/10 p-3 text-center">
-                <Umbrella className="mx-auto h-5 w-5 text-indigo-300" />
-                <p className="mt-1 text-xs text-brand-100">Rain</p>
-                <p className="font-bold">{w.rain ? `${w.rain} mm` : '0 mm'}</p>
+              <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+                <Stat icon={ThermometerSun} color="text-amber-300" label="Feels like" value={`${Math.round(w.feelsLike)}°C`} />
+                <Stat icon={Droplets} color="text-sky-300" label="Humidity" value={`${w.humidity ?? '—'}%`} />
+                <Stat icon={Wind} color="text-teal-300" label="Wind speed" value={`${w.windSpeed ?? '—'} m/s`} />
+                <Stat icon={Umbrella} color="text-indigo-300" label="Rain" value={w.rain ? `${w.rain} mm` : '0 mm'} />
+                <Stat icon={Gauge} color="text-rose-300" label="Pressure" value={w.pressure != null ? `${w.pressure} hPa` : '—'} />
+                <Stat icon={Eye} color="text-emerald-300" label="Visibility" value={w.visibility != null ? `${(w.visibility / 1000).toFixed(1)} km` : '—'} />
+                <Stat icon={Sunrise} color="text-amber-200" label="Sunrise" value={formatSunTime(w.sunrise, w.timezone)} />
+                <Stat icon={Sunset} color="text-orange-300" label="Sunset" value={formatSunTime(w.sunset, w.timezone)} />
               </div>
             </div>
           </div>
@@ -88,7 +93,7 @@ export default function Weather() {
           )}
 
           <h3 className="mb-3 text-base font-extrabold text-slate-900 dark:text-white">7-day forecast</h3>
-          {forecast?.isLive && (
+          {forecast?.isLive ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
               {forecast.forecast.map((d) => (
                 <div key={d.date} className="card p-4 text-center">
@@ -101,6 +106,8 @@ export default function Weather() {
                 </div>
               ))}
             </div>
+          ) : (
+            forecast && <p className="text-sm text-slate-500">7-day forecast unavailable: {forecast.message}</p>
           )}
         </>
       )}

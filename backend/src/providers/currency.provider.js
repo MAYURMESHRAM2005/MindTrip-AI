@@ -1,4 +1,4 @@
-import { live, unavailable, fetchWithTimeout } from './base.provider.js';
+import { live, unavailable, axiosGet } from './base.provider.js';
 
 let cachedRates = null;
 let cachedAt = 0;
@@ -13,8 +13,7 @@ export async function getRates(base = 'USD') {
     return live('exchangerate', cachedRates, 'Cached exchange rates');
   }
   try {
-    const res = await fetchWithTimeout(`https://open.er-api.com/v6/latest/${base}`, {}, 8000);
-    const data = await res.json();
+    const data = await axiosGet(`https://open.er-api.com/v6/latest/${base}`, {}, 8000);
     if (data.result !== 'success' || !data.rates) {
       return unavailable('exchangerate', 'Exchange rate API returned an error');
     }

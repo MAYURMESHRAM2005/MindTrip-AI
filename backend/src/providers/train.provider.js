@@ -1,5 +1,5 @@
 import env from '../config/env.js';
-import { live, unavailable, fetchWithTimeout } from './base.provider.js';
+import { live, unavailable, axiosPost } from './base.provider.js';
 
 /**
  * Train provider - designed to connect to a configured legitimate train API
@@ -18,19 +18,17 @@ export async function searchTrains({ from, to, date, passengers = 1, trainClass 
   try {
     const url = `${env.TRAIN_API_URL.replace(/\/$/, '')}/search`;
     const body = { from, to, date, passengers, trainClass: trainClass || '' };
-    const res = await fetchWithTimeout(
+    const data = await axiosPost(
       url,
+      body,
       {
-        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(env.TRAIN_API_KEY ? { Authorization: `Bearer ${env.TRAIN_API_KEY}` } : {}),
         },
-        body: JSON.stringify(body),
       },
       10000
     );
-    const data = await res.json();
     if (!data || !Array.isArray(data.trains)) {
       return unavailable('train', 'Train provider returned an unexpected response shape.');
     }

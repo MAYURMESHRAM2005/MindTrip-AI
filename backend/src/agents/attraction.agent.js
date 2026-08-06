@@ -34,7 +34,7 @@ class AttractionAgent extends BaseAgent {
       prompt: `Destination: ${destination}
 Interests: ${interests?.join(', ') || 'general'}
 Activity level: ${activityLevel || 'moderate'}
-Real attraction data from Google Places:
+Real attraction data from Geoapify Places:
 ${JSON.stringify(providerResult.data, null, 2)}
 Select a balanced set of must-see attractions from this list only.`,
       userId,

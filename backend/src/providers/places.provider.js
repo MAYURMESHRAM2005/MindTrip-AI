@@ -1,102 +1,169 @@
 import env from '../config/env.js';
-import { live, unavailable, fetchWithTimeout } from './base.provider.js';
+import { live, unavailable, axiosGet } from './base.provider.js';
 
-const BASE = 'https://maps.googleapis.com/maps/api/place';
+/**
+ * Geoapify Places provider.
+ * Same function signatures as before, so controllers and AI agents keep working.
+ */
+
+const PLACES_URL = 'https://api.geoapify.com/v2/places';
+const DETAILS_URL = 'https://api.geoapify.com/v2/place-details';
+const GEOCODE_URL = 'https://api.geoapify.com/v1/geocode/search';
 
 function key() {
-  return env.GOOGLE_MAPS_API_KEY;
+  return env.GEOAPIFY_API_KEY;
 }
 
-const TYPE_MAP = {
-  tourist_attraction: 'tourist_attraction',
-  restaurant: 'restaurant',
-  hotel: 'lodging',
-  hospital: 'hospital',
-  police: 'police',
-  pharmacy: 'pharmacy',
-  atm: 'atm',
-  transit_station: 'transit_station',
-  embassy: 'embassy',
-  cafe: 'cafe',
-  shopping: 'shopping_mall',
+const CATEGORY_MAP = {
+  tourist_attraction: 'tourism.sights,tourism.attraction,tourism.monument',
+  restaurant: 'catering.restaurant',
+  hotel: 'accommodation.hotel',
+  hospital: 'healthcare.hospital',
+  police: 'amenity.police',
+  pharmacy: 'healthcare.pharmacy',
+  atm: 'finance.atm',
+  transit_station: 'public_transport',
+  embassy: 'office.diplomatic',
+  cafe: 'catering.cafe',
+  shopping: 'commercial.shopping_mall',
 };
 
-function mapResult(p) {
+/** Normalize a Geoapify Places GeoJSON feature into the previous place shape. */
+function mapResult(f) {
+  const p = f?.properties || {};
+  const [lng, lat] = f?.geometry?.coordinates || [null, null];
   return {
-    placeId: p.place_id,
-    name: p.name,
-    address: p.formatted_address || p.vicinity || '',
-    coordinates: p.geometry?.location
-      ? { lat: p.geometry.location.lat, lng: p.geometry.location.lng }
-      : null,
-    rating: p.rating ?? null,
-    userRatingsTotal: p.user_ratings_total ?? null,
-    priceLevel: p.price_level ?? null,
-    types: p.types || [],
-    openNow: p.opening_hours?.open_now ?? null,
-    photoRef: p.photos?.[0]?.photo_reference || '',
-    distanceMeters: p.distance_meters ?? null,
-    businessStatus: p.business_status || '',
-    url: p.url || '',
+    placeId: p.place_id || '',
+    name: p.name || '',
+    address: p.formatted || p.address_line1 || '',
+    coordinates: lat != null && lng != null ? { lat, lng } : null,
+    rating: null,
+    userRatingsTotal: null,
+    priceLevel: null,
+    types: p.categories || [],
+    openNow: null,
+    photoRef: '',
+    distanceMeters: p.distance ?? null,
+    businessStatus: '',
+    url: p.website || '',
     website: p.website || '',
   };
 }
 
-/**
- * Text search - the main search for restaurants, attractions, hotels by keyword.
- */
-export async function textSearch({ query, lat, lng, radius = 5000, type = 'tourist_attraction', limit = 10 }) {
-  if (!key()) return unavailable('google-places', 'Google Maps (Places) API key not configured');
-  try {
-    let url = `${BASE}/textsearch/json?query=${encodeURIComponent(query)}&radius=${radius}&key=${key()}`;
-    if (type && TYPE_MAP[type]) url += `&type=${TYPE_MAP[type]}`;
-    if (lat && lng) url += `&location=${lat},${lng}`;
-    const res = await fetchWithTimeout(url);
-    const data = await res.json();
-    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      return unavailable('google-places', `Places search failed: ${data.status} (${data.error_message || ''})`);
-    }
-    return live('google-places', (data.results || []).slice(0, limit).map(mapResult), 'Live data from Google Places');
-  } catch (err) {
-    return unavailable('google-places', `Live data unavailable: ${err.message}`);
-  }
+async function apiGet(url, params) {
+  const qs = new URLSearchParams({ apiKey: key(), ...params });
+  return axiosGet(`${url}?${qs}`, {}, 8000);
 }
 
 /**
- * Nearby search - hospitals, police, ATMs, pharmacies, transit near a point.
+ * Text search — restaurants, attractions, hotels by keyword.
+ * Uses Geoapify Places with a spatial bias when coordinates are available;
+ * falls back to amenity geocoding for text-only queries.
  */
-export async function nearbySearch({ lat, lng, type = 'hospital', radius = 5000, limit = 12 }) {
-  if (!key()) return unavailable('google-places', 'Google Maps (Places) API key not configured');
+export async function textSearch({ query, lat, lng, radius = 5000, type = 'tourist_attraction', limit = 10 }) {
+  if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
+
+  // Places API first. Errors and empty results both fall through to the
+  // amenity-geocode fallback below (the API may reject text-only queries).
+  let features = [];
   try {
-    const t = TYPE_MAP[type] || type;
-    const url = `${BASE}/nearbysearch/json?location=${lat},${lng}&radius=${radius}&type=${t}&key=${key()}`;
-    const res = await fetchWithTimeout(url);
-    const data = await res.json();
-    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
-      return unavailable('google-places', `Nearby search failed: ${data.status}`);
+    const params = {
+      text: query,
+      categories: CATEGORY_MAP[type] || type,
+      limit: Math.min(Number(limit) || 10, 20),
+      lang: 'en',
+      format: 'json',
+    };
+    if (lat != null && lng != null) {
+      params.filter = `circle:${lng},${lat},${radius}`;
+      params.bias = `proximity:${lng},${lat}`;
     }
-    return live('google-places', (data.results || []).slice(0, limit).map(mapResult), 'Live data from Google Places');
+    const data = await apiGet(PLACES_URL, params);
+    features = data?.features || [];
+  } catch {
+    features = [];
+  }
+
+  if (features.length) {
+    return live('geoapify', features.slice(0, limit).map(mapResult), 'Live data from Geoapify');
+  }
+
+  // Text-only fallback: geocode the query as an amenity (e.g. "restaurants in Goa")
+  try {
+    const g = await apiGet(GEOCODE_URL, {
+      text: query,
+      type: 'amenity',
+      limit: Math.min(Number(limit) || 10, 20),
+      format: 'json',
+      lang: 'en',
+    });
+    const results = g?.results || [];
+    if (!results.length) {
+      return unavailable('geoapify', `Places search failed: no results for "${query}"`);
+    }
+    return live(
+      'geoapify',
+      results.slice(0, limit).map((r) => ({
+        placeId: r.place_id || '',
+        name: r.name || r.formatted || '',
+        address: r.formatted || '',
+        coordinates: r.lat != null && r.lon != null ? { lat: r.lat, lng: r.lon } : null,
+        rating: null,
+        userRatingsTotal: null,
+        priceLevel: null,
+        types: r.result_type ? [r.result_type] : [],
+        openNow: null,
+        photoRef: '',
+        distanceMeters: null,
+        businessStatus: '',
+        url: '',
+        website: '',
+      })),
+      'Live data from Geoapify'
+    );
   } catch (err) {
-    return unavailable('google-places', `Live data unavailable: ${err.message}`);
+    return unavailable('geoapify', `Live data unavailable: ${err.message}`);
+  }
+}
+
+/** Nearby search — hospitals, police, ATMs, pharmacies, transit near a point. */
+export async function nearbySearch({ lat, lng, type = 'hospital', radius = 5000, limit = 12 }) {
+  if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
+  try {
+    if (lat == null || lng == null) {
+      return unavailable('geoapify', 'Nearby search requires coordinates');
+    }
+    const data = await apiGet(PLACES_URL, {
+      categories: CATEGORY_MAP[type] || type,
+      filter: `circle:${lng},${lat},${radius}`,
+      bias: `proximity:${lng},${lat}`,
+      limit: Math.min(Number(limit) || 12, 20),
+      lang: 'en',
+      format: 'json',
+    });
+    const features = data?.features || [];
+    return live('geoapify', features.slice(0, limit).map(mapResult), 'Live data from Geoapify');
+  } catch (err) {
+    return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }
 
 export async function placeDetails(placeId) {
-  if (!key()) return unavailable('google-places', 'Google Maps (Places) API key not configured');
+  if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
   try {
-    const url = `${BASE}/details/json?place_id=${encodeURIComponent(placeId)}&fields=name,formatted_address,geometry,rating,user_ratings_total,price_level,website,url,opening_hours,photos,international_phone_number,types&key=${key()}`;
-    const res = await fetchWithTimeout(url);
-    const data = await res.json();
-    if (data.status !== 'OK') return unavailable('google-places', `Place details failed: ${data.status}`);
-    return live('google-places', mapResult(data.result));
+    const data = await apiGet(DETAILS_URL, { id: placeId, lang: 'en', format: 'json' });
+    if (!data?.features?.[0]) {
+      return unavailable('geoapify', `Place details failed: ${data?.error || 'not found'}`);
+    }
+    return live('geoapify', mapResult(data.features[0]));
   } catch (err) {
-    return unavailable('google-places', `Live data unavailable: ${err.message}`);
+    return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }
 
-export function photoUrl(photoRef, maxWidth = 600) {
-  if (!key() || !photoRef) return '';
-  return `${BASE}/photo?maxwidth=${maxWidth}&photo_reference=${encodeURIComponent(photoRef)}&key=${key()}`;
+/** Geoapify has no photo API — kept for signature compatibility. */
+export function photoUrl() {
+  return '';
 }
 
 export default { textSearch, nearbySearch, placeDetails, photoUrl, mapResult };

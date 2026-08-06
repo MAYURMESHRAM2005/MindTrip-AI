@@ -6,7 +6,7 @@ import { convert } from '../providers/currency.provider.js';
 
 /**
  * Search hotels: Amadeus offers first. When Amadeus is unconfigured we
- * fall back to Google Places lodging results (live place data) clearly
+ * fall back to Geoapify Places lodging results (live place data) clearly
  * labelled with its source - never invented inventory.
  */
 export const searchHotels = asyncHandler(async (req, res) => {
@@ -26,7 +26,7 @@ export const searchHotels = asyncHandler(async (req, res) => {
     return res.json(ApiResponse.ok(amadeus.message, { hotels: amadeus.data, provider: 'amadeus', isLive: true }));
   }
 
-  // Fallback: live Google Places "lodging" data
+  // Fallback: live Geoapify Places lodging data
   const places = await placesProvider.textSearch({ query: `${city} hotels`, type: 'hotel', limit: 10 });
   if (places.isLive) {
     const hotels = places.data.map((p) => ({
@@ -38,12 +38,12 @@ export const searchHotels = asyncHandler(async (req, res) => {
       priceLevel: p.priceLevel,
       amenities: [],
       price: null,
-      provider: 'Google Places',
+      provider: 'Geoapify Places',
       bookingUrl: '',
       isLive: true,
-      dataSource: 'google-places',
+      dataSource: 'geoapify',
     }));
-    return res.json(ApiResponse.ok('Live hotel listings from Google Places (Amadeus unavailable)', { hotels, provider: 'google-places', isLive: true, note: amadeus.message }));
+    return res.json(ApiResponse.ok('Live hotel listings from Geoapify Places (Amadeus unavailable)', { hotels, provider: 'geoapify', isLive: true, note: amadeus.message }));
   }
 
   res.json(

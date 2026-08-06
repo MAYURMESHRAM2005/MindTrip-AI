@@ -11,9 +11,11 @@ export const geocode = asyncHandler(async (req, res) => {
 
 export const directions = asyncHandler(async (req, res) => {
   const { origin, destination, mode, alternatives } = req.query;
-  const result = await mapsProvider.directions(origin, destination, mode, alternatives !== 'false');
+  // Accept both the URL string form (?alternatives=false) and coerced boolean.
+  const wantAlternatives = alternatives !== 'false' && alternatives !== false && alternatives !== '0';
+  const result = await mapsProvider.directions(origin, destination, mode, wantAlternatives);
 
-  // When Google is unavailable, provide a straight-line distance estimate,
+  // When Geoapify is unavailable, provide a straight-line distance estimate,
   // clearly labelled as an approximation.
   if (!result.isLive) {
     const g1 = await mapsProvider.geocode(origin);
@@ -51,7 +53,8 @@ export const nearbyPoints = asyncHandler(async (req, res) => {
   const results = {};
   let allUnavailable = true;
 
-  for (const type of typeList.slice(0, 5)) {
+  // Support all map categories (up to 10) — hotels, restaurants, attractions, etc.
+  for (const type of typeList.slice(0, 10)) {
     const r = await placesProvider.nearbySearch({
       lat: Number(lat),
       lng: Number(lng),

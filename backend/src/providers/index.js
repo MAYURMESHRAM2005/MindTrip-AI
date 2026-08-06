@@ -26,7 +26,7 @@ export const providers = {
 export function providerStatuses() {
   return [
     { name: 'Gemini AI', configured: Boolean(env.GEMINI_API_KEY), kind: 'ai' },
-    { name: 'Google Maps / Places', configured: Boolean(env.GOOGLE_MAPS_API_KEY), kind: 'maps' },
+    { name: 'Geoapify (Maps & Places)', configured: Boolean(env.GEOAPIFY_API_KEY), kind: 'maps' },
     { name: 'OpenWeatherMap', configured: Boolean(env.OPENWEATHER_API_KEY), kind: 'weather' },
     { name: 'Amadeus (Flights)', configured: Boolean(env.AMADEUS_CLIENT_ID && env.AMADEUS_CLIENT_SECRET), kind: 'flights' },
     { name: 'Amadeus (Hotels)', configured: Boolean(env.AMADEUS_CLIENT_ID && env.AMADEUS_CLIENT_SECRET), kind: 'hotels' },

@@ -24,7 +24,7 @@ export default function Restaurants() {
 
   return (
     <div>
-      <PageHeader icon={UtensilsCrossed} title="Restaurants" subtitle="Real Google Places data with food-preference filters." />
+      <PageHeader icon={UtensilsCrossed} title="Restaurants" subtitle="Real Geoapify Places data with food-preference filters." />
 
       <div className="card mb-6 p-5">
         <div className="flex flex-wrap items-end gap-3">
@@ -64,13 +64,13 @@ export default function Restaurants() {
       {isLoading && <div className="flex justify-center py-12"><Spinner size="lg" /></div>}
 
       {data && !data.isLive && (
-        <ProviderNotice title="Live restaurant data unavailable" message={data.message} externalSources={[{ name: 'Google Maps', url: 'https://www.google.com/maps' }, { name: 'Zomato', url: 'https://www.zomato.com' }]} />
+        <ProviderNotice title="Live restaurant data unavailable" message={data.message} externalSources={[{ name: 'OpenStreetMap', url: 'https://www.openstreetmap.org' }, { name: 'Zomato', url: 'https://www.zomato.com' }]} />
       )}
 
       {data?.isLive && (
         <>
           <p className="mb-3 text-xs font-semibold text-emerald-600">
-            ● Live from Google Places
+            ● Live from Geoapify Places
             {data.filterApplied && (
               <span className="text-slate-400"> · diet filter requested (Places may not expose diet labels — check each listing)</span>
             )}
@@ -105,12 +105,12 @@ export default function Restaurants() {
                   )}
                   <div className="mt-auto pt-3">
                     <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.name)}&query_place_id=${encodeURIComponent(r.placeId || '')}`}
+                      href={r.coordinates?.lat != null ? `https://www.openstreetmap.org/?mlat=${r.coordinates.lat}&mlon=${r.coordinates.lng}#map=17/${r.coordinates.lat}/${r.coordinates.lng}` : `https://www.openstreetmap.org/search?query=${encodeURIComponent(r.name)}`}
                       target="_blank"
                       rel="noreferrer"
                       className="btn-secondary w-full py-1.5 text-xs"
                     >
-                      View on Google Maps
+                      View on map
                     </a>
                   </div>
                 </div>

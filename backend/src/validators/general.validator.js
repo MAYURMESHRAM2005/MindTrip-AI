@@ -34,6 +34,7 @@ export const weatherQuery = Joi.object({
   lat: Joi.number().min(-90).max(90),
   lng: Joi.number().min(-180).max(180),
   units: Joi.string().valid('metric', 'imperial').default('metric'),
+  days: Joi.number().integer().min(1).max(16).default(7),
 }).or('city', 'lat', 'lng');
 
 export const hotelSearchSchema = Joi.object({

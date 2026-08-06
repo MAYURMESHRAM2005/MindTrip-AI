@@ -1,5 +1,5 @@
 import env from '../config/env.js';
-import { live, unavailable, fetchWithTimeout } from './base.provider.js';
+import { live, unavailable, axiosPost, axiosGet } from './base.provider.js';
 
 let cachedToken = null;
 let cachedTokenExpiry = 0;
@@ -15,12 +15,12 @@ async function getToken() {
     client_id: env.AMADEUS_CLIENT_ID,
     client_secret: env.AMADEUS_CLIENT_SECRET,
   });
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  }, 8000);
-  const data = await res.json();
+  const data = await axiosPost(
+    url,
+    body.toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    8000
+  );
   if (!data.access_token) throw new Error(data.error_description || 'Amadeus auth failed');
   cachedToken = data.access_token;
   cachedTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
@@ -37,8 +37,7 @@ export async function searchHotels({ city, checkIn, checkOut, adults = 2, rooms 
 
     // 1. Hotel list by city keyword
     const listUrl = `${host}/v1/reference-data/locations/hotels/by-city?cityCode=${encodeURIComponent(city)}`;
-    const listRes = await fetchWithTimeout(listUrl, { headers: { Authorization: `Bearer ${token}` } }, 10000);
-    const listData = await listRes.json();
+    const listData = await axiosGet(listUrl, {}, { headers: { Authorization: `Bearer ${token}` } }, 10000);
     const hotels = listData.data || [];
 
     const hotelIds = hotels
@@ -52,8 +51,7 @@ export async function searchHotels({ city, checkIn, checkOut, adults = 2, rooms 
 
     // 2. Hotel offers for those hotels
     const offersUrl = `${host}/v3/shopping/hotel-offers?hotelIds=${hotelIds.join(',')}&checkInDate=${checkIn}&checkOutDate=${checkOut}&adults=${adults}&roomQuantity=${rooms}&currency=INR`;
-    const offersRes = await fetchWithTimeout(offersUrl, { headers: { Authorization: `Bearer ${token}` } }, 12000);
-    const offersData = await offersRes.json();
+    const offersData = await axiosGet(offersUrl, {}, { headers: { Authorization: `Bearer ${token}` } }, 12000);
     const offers = (offersData.data || []).map((item) => {
       const offer = item.offers?.[0] || {};
       const price = offer.price?.total ? Number(offer.price.total) : null;

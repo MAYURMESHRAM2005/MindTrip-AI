@@ -75,6 +75,14 @@ export const mapsApi = {
   nearby: (params) => api.get('/maps/nearby', { params }),
 };
 
+export const geocodeApi = {
+  geocode: (address) => api.get('/geocode', { params: { address } }),
+};
+
+export const routesApi = {
+  directions: (params) => api.get('/routes', { params }),
+};
+
 export const weatherApi = {
   current: (params) => api.get('/weather/current', { params }),
   forecast: (params) => api.get('/weather/forecast', { params }),
@@ -146,4 +154,4 @@ export const healthApi = {
   check: () => api.get('/health'),
 };
 
-export default { authApi, userApi, tripApi, hotelsApi, flightsApi, trainsApi, busesApi, restaurantsApi, placesApi, mapsApi, weatherApi, currencyApi, chatApi, voiceApi, expensesApi, ticketsApi, emergencyApi, notificationsApi, translateApi, adminApi, healthApi };
+export default { authApi, userApi, tripApi, hotelsApi, flightsApi, trainsApi, busesApi, restaurantsApi, placesApi, mapsApi, geocodeApi, routesApi, weatherApi, currencyApi, chatApi, voiceApi, expensesApi, ticketsApi, emergencyApi, notificationsApi, translateApi, adminApi, healthApi };

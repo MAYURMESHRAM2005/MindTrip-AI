@@ -16,10 +16,10 @@ const FEATURES = [
   { icon: CloudSun, title: 'Live Weather', desc: 'Real forecasts from OpenWeatherMap woven into your daily itinerary, with rain-day backups.' },
   { icon: MessageSquare, title: 'Contextual Chatbot', desc: '“Make my trip ₹5,000 cheaper” — the bot really updates your itinerary and budget.' },
   { icon: Mic, title: 'Voice Assistant', desc: '“Plan a 5-day Goa trip under ₹25,000” — speak your trip into existence.' },
-  { icon: ImageIcon, title: 'Image Search', desc: 'Upload a photo of a landmark; Gemini identifies it and Google Places finds real information.' },
+  { icon: ImageIcon, title: 'Image Search', desc: 'Upload a photo of a landmark; Gemini identifies it and Geoapify Places finds real information.' },
   { icon: QrCode, title: 'QR Ticket Wallet', desc: 'Store your own bookings with QR codes generated from your references — never fabricated.' },
   { icon: WifiOff, title: 'Offline Itinerary', desc: 'PWA + service worker keep your itinerary, hotel and emergency info available offline.' },
-  { icon: Hotel, title: 'Real Hotels & Flights', desc: 'Amadeus offers and Google Places data when configured — and honest “Live data unavailable” otherwise.' },
+  { icon: Hotel, title: 'Real Hotels & Flights', desc: 'Amadeus offers and Geoapify Places data when configured — and honest “Live data unavailable” otherwise.' },
   { icon: UtensilsCrossed, title: 'Restaurant Matching', desc: 'Vegetarian, vegan or non-veg — restaurants matched to your food preference from real data.' },
   { icon: Shield, title: 'Secure by Design', desc: 'JWT + rotating refresh tokens, httpOnly cookies, rate limiting, input validation and RBAC.' },
 ];

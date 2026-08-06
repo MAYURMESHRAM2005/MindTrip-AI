@@ -1,5 +1,5 @@
 import env from '../config/env.js';
-import { live, unavailable, fetchWithTimeout } from './base.provider.js';
+import { live, unavailable, axiosPost, axiosGet } from './base.provider.js';
 
 let cachedToken = null;
 let cachedTokenExpiry = 0;
@@ -15,12 +15,12 @@ async function getToken() {
     client_id: env.AMADEUS_CLIENT_ID,
     client_secret: env.AMADEUS_CLIENT_SECRET,
   });
-  const res = await fetchWithTimeout(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  }, 8000);
-  const data = await res.json();
+  const data = await axiosPost(
+    url,
+    body.toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    8000
+  );
   if (!data.access_token) throw new Error(data.error_description || 'Amadeus auth failed');
   cachedToken = data.access_token;
   cachedTokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
@@ -42,10 +42,7 @@ export async function searchFlights({ origin, destination, departDate, returnDat
     )}&destinationLocationCode=${encodeURIComponent(destination)}&departureDate=${departDate}&adults=${adults}&travelClass=${travelClass}&currencyCode=INR&max=20`;
     if (returnDate) url += `&returnDate=${returnDate}`;
     if (nonStop) url += '&nonStop=true';
-    const res = await fetchWithTimeout(url, {
-      headers: { Authorization: `Bearer ${token}` },
-    }, 12000);
-    const data = await res.json();
+    const data = await axiosGet(url, {}, { headers: { Authorization: `Bearer ${token}` } }, 12000);
     if (data.errors) {
       return unavailable('amadeus-flights', data.errors.map((e) => e.detail).join('; '));
     }

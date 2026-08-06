@@ -1,93 +1,221 @@
 import env from '../config/env.js';
-import { live, unavailable, fetchWithTimeout } from './base.provider.js';
+import { live, unavailable, axiosGet, axiosPost } from './base.provider.js';
 
-const BASE = 'https://maps.googleapis.com/maps/api';
+/**
+ * Geoapify maps provider.
+ * Geocoding, Routing and Matrix APIs from api.geoapify.com.
+ * Same function signatures as the old Google provider, so controllers and
+ * AI agents keep working unchanged.
+ */
+
+const GEOCODE_URL = 'https://api.geoapify.com/v1/geocode/search';
+const ROUTE_URL = 'https://api.geoapify.com/v1/routing';
+const MATRIX_URL = 'https://api.geoapify.com/v1/matrix';
 
 function key() {
-  return env.GOOGLE_MAPS_API_KEY;
+  return env.GEOAPIFY_API_KEY;
 }
 
-export async function geocode(address) {
-  if (!key()) return unavailable('google-maps', 'Google Maps API key not configured');
-  try {
-    const url = `${BASE}/geocode/json?address=${encodeURIComponent(address)}&key=${key()}`;
-    const res = await fetchWithTimeout(url);
-    const data = await res.json();
-    if (data.status !== 'OK' || !data.results?.length) {
-      return unavailable('google-maps', `Geocoding failed: ${data.status} (${data.error_message || ''})`);
+const MODE_MAP = {
+  driving: 'drive',
+  walking: 'walk',
+  bicycling: 'bicycle',
+  transit: 'transit',
+  drive: 'drive',
+  walk: 'walk',
+  bicycle: 'bicycle',
+};
+
+const COORD_RE = /^-?\d+(\.\d+)?,-?\d+(\.\d+)?$/;
+
+/* ---------- polyline helpers (5th precision, Leaflet-compatible) ---------- */
+
+function decodePolyline(encoded) {
+  const points = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+  while (index < encoded.length) {
+    let result = 0;
+    let shift = 0;
+    let b;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dLat = result & 1 ? ~(result >> 1) : result >> 1;
+    lat += dLat;
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dLng = result & 1 ? ~(result >> 1) : result >> 1;
+    lng += dLng;
+    points.push([lat / 1e5, lng / 1e5]);
+  }
+  return points;
+}
+
+function encodePolyline(points) {
+  let str = '';
+  let prevLat = 0;
+  let prevLng = 0;
+  const enc = (v) => {
+    let r = v < 0 ? ~(v << 1) : v << 1;
+    let out = '';
+    while (r >= 0x20) {
+      out += String.fromCharCode((0x20 | (r & 0x1f)) + 63);
+      r >>= 5;
     }
-    const r = data.results[0];
-    return live('google-maps', {
-      address: r.formatted_address,
-      lat: r.geometry.location.lat,
-      lng: r.geometry.location.lng,
-      placeId: r.place_id,
+    out += String.fromCharCode(r + 63);
+    return out;
+  };
+  for (const [lat, lng] of points) {
+    str += enc(Math.round((lat - prevLat) * 1e5));
+    str += enc(Math.round((lng - prevLng) * 1e5));
+    prevLat = lat;
+    prevLng = lng;
+  }
+  return str;
+}
+
+/** GeoJSON geometry (or encoded polyline string) → [[lat, lng], ...] */
+function geometryToLatLngs(geometry) {
+  if (!geometry) return [];
+  if (typeof geometry === 'string') return decodePolyline(geometry).map(([lat, lng]) => [lat, lng]);
+  const coords = geometry.coordinates || [];
+  if (geometry.type === 'MultiLineString') {
+    return coords.flatMap((line) => line.map(([lng, lat]) => [lat, lng]));
+  }
+  return coords.map(([lng, lat]) => [lat, lng]);
+}
+
+/* ------------------------------- helpers -------------------------------- */
+
+async function apiGet(url, params) {
+  const qs = new URLSearchParams({ apiKey: key(), ...params });
+  return axiosGet(`${url}?${qs}`, {}, 8000);
+}
+
+function parseCoordString(s) {
+  const [lat, lng] = String(s).split(',').map(Number);
+  return { lat, lng };
+}
+
+/** Accept "lat,lng" strings directly, geocode anything else. */
+async function resolveCoordinates(place) {
+  if (COORD_RE.test(String(place).trim())) return parseCoordString(place);
+  const g = await geocode(place);
+  return g.isLive ? g.data : null;
+}
+
+/* -------------------------------- exports -------------------------------- */
+
+export async function geocode(address) {
+  if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
+  try {
+    const data = await apiGet(GEOCODE_URL, { text: address, limit: 1, format: 'json', lang: 'en' });
+    const r = data?.results?.[0];
+    if (!r) return unavailable('geoapify', `Geocoding failed: no results for "${address}"`);
+    return live('geoapify', {
+      address: r.formatted || r.address_line1 || address,
+      lat: r.lat,
+      lng: r.lon,
+      placeId: r.place_id || '',
     });
   } catch (err) {
-    return unavailable('google-maps', `Live data unavailable: ${err.message}`);
+    return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }
 
 export async function directions(origin, destination, mode = 'driving', alternatives = true) {
-  if (!key()) return unavailable('google-maps', 'Google Maps API key not configured');
+  if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
   try {
-    const url = `${BASE}/directions/json?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(
-      destination
-    )}&mode=${mode}&alternatives=${alternatives}&key=${key()}`;
-    const res = await fetchWithTimeout(url);
-    const data = await res.json();
-    if (data.status !== 'OK') {
-      return unavailable('google-maps', `Directions failed: ${data.status}`);
+    const o = await resolveCoordinates(origin);
+    const d = await resolveCoordinates(destination);
+    if (!o || !d) {
+      return unavailable('geoapify', 'Directions failed: could not geocode origin/destination');
     }
-    const routes = data.routes.map((route) => ({
-      summary: route.summary,
-      distanceKm: Math.round((route.legs?.[0]?.distance?.value || 0) / 1000),
-      durationMin: Math.round((route.legs?.[0]?.duration?.value || 0) / 60),
-      trafficAware: data.routes[0]?.legs?.[0]?.duration_in_traffic != null,
-      polyline: route.overview_polyline?.points || '',
-      steps: (route.legs?.[0]?.steps || []).slice(0, 30).map((s) => ({
-        instruction: s.html_instructions?.replace(/<[^>]*>/g, '') || '',
-        distanceKm: Math.round((s.distance?.value || 0) / 1000),
-        durationMin: Math.round((s.duration?.value || 0) / 60),
-      })),
-    }));
-    return live('google-maps', { origin, destination, mode, routes });
+    const params = {
+      waypoints: `${o.lat},${o.lng}|${d.lat},${d.lng}`,
+      mode: MODE_MAP[mode] || 'drive',
+      units: 'metric',
+      format: 'geojson',
+      details: 'instruction_details',
+      steps: true,
+    };
+    if (alternatives) params.alternatives = 2;
+    const data = await apiGet(ROUTE_URL, params);
+    const features = data?.features || [];
+    if (!features.length) {
+      return unavailable('geoapify', `Directions failed: ${data.message || 'no routes found'}`);
+    }
+    const routes = features.map((f) => {
+      const props = f.properties || {};
+      return {
+        summary: props.mode ? `${props.mode} route` : 'Geoapify route',
+        distanceKm: Math.round((props.distance || 0) / 1000),
+        durationMin: Math.round((props.time || 0) / 60),
+        trafficAware: false,
+        polyline: encodePolyline(geometryToLatLngs(f.geometry)),
+        steps: (props.legs?.[0]?.steps || []).slice(0, 30).map((s) => ({
+          instruction: s.instruction || '',
+          distanceKm: Math.round((s.distance || 0) / 1000),
+          durationMin: Math.round((s.time || 0) / 60),
+        })),
+      };
+    });
+    return live('geoapify', { origin, destination, mode, routes, originPoint: o, destinationPoint: d });
   } catch (err) {
-    return unavailable('google-maps', `Live data unavailable: ${err.message}`);
+    return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }
 
 export async function distanceMatrix(origins, destinations, mode = 'driving') {
-  if (!key()) return unavailable('google-maps', 'Google Maps API key not configured');
+  if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
   try {
-    const url = `${BASE}/distancematrix/json?origins=${encodeURIComponent(
-      origins.join('|')
-    )}&destinations=${encodeURIComponent(destinations.join('|'))}&mode=${mode}&key=${key()}`;
-    const res = await fetchWithTimeout(url);
-    const data = await res.json();
-    if (data.status !== 'OK') return unavailable('google-maps', `Distance Matrix failed: ${data.status}`);
-    return live('google-maps', {
-      rows: (data.rows || []).map((row) =>
-        (row.elements || []).map((el) => ({
-          status: el.status,
-          distanceKm: el.distance ? Math.round(el.distance.value / 1000) : null,
-          durationMin: el.duration ? Math.round(el.duration.value / 60) : null,
-          durationInTrafficMin: el.duration_in_traffic ? Math.round(el.duration_in_traffic.value / 60) : null,
+    const resolveMany = async (list) => {
+      const out = [];
+      for (const item of list) {
+        const c = await resolveCoordinates(item);
+        out.push(c ? { location: [c.lng, c.lat] } : null);
+      }
+      return out;
+    };
+    const sources = await resolveMany(origins);
+    const targets = await resolveMany(destinations);
+    if (sources.some((s) => !s) || targets.some((t) => !t)) {
+      return unavailable('geoapify', 'Matrix failed: could not geocode all points');
+    }
+    const data = await axiosPost(
+      MATRIX_URL,
+      { mode: MODE_MAP[mode] || 'drive', sources, targets, units: 'metric' },
+      { params: { apiKey: key() } },
+      10000
+    );
+    const matrix = data?.sources_to_targets || [];
+    return live('geoapify', {
+      rows: matrix.map((row) =>
+        (row || []).map((el) => ({
+          status: el && el.time != null ? 'OK' : 'NOT_FOUND',
+          distanceKm: el && el.distance != null ? Math.round(el.distance / 1000) : null,
+          durationMin: el && el.time != null ? Math.round(el.time / 60) : null,
+          durationInTrafficMin: null,
         }))
       ),
     });
   } catch (err) {
-    return unavailable('google-maps', `Live data unavailable: ${err.message}`);
+    return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }
 
-export function staticMapUrl({ lat, lng, zoom = 13, size = '600x300', markers = [] }) {
-  if (!key()) return '';
-  const parts = [`${BASE}/staticmap?center=${lat},${lng}&zoom=${zoom}&size=${size}&key=${key()}`];
-  markers.slice(0, 20).forEach((m, i) => {
-    parts.push(`&markers=color:${m.color || 'red'}|${m.lat},${m.lng}`);
-  });
-  return parts.join('');
+/** Geoapify static maps require billing; the UI uses Leaflet + OSM tiles. */
+export function staticMapUrl() {
+  return '';
 }
 
 export default { geocode, directions, distanceMatrix, staticMapUrl };

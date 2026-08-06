@@ -65,6 +65,8 @@ test('all feature routes are wired and respond', { skip: skipReason }, async () 
       ['GET', '/api/restaurants/search?q=Goa%20restaurants', 200],
       ['GET', '/api/places/search?q=Goa', 200],
       ['GET', '/api/maps/geocode?address=Goa', 200],
+      ['GET', '/api/geocode?address=Goa', 200],
+      ['GET', '/api/routes?origin=Mumbai&destination=Goa&mode=driving', 200],
       ['GET', '/api/weather/forecast?city=Goa', 200],
       ['GET', '/api/currency/rates', 200],
       ['POST', '/api/chat', 200, { message: 'What should I do if it rains?', tripId }],

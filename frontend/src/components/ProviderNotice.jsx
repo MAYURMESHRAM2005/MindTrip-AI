@@ -1,11 +1,12 @@
 import React from 'react';
-import { WifiOff, ExternalLink } from 'lucide-react';
+import { WifiOff, ExternalLink, RotateCw } from 'lucide-react';
 
 /**
  * Banner shown whenever live data from an external provider is unavailable.
  * Every visible feature either shows live data or this honest notice.
+ * Pass `action={{ label, onClick }}` to render a retry button.
  */
-export default function ProviderNotice({ message, externalSources = [], title = 'Live data unavailable' }) {
+export default function ProviderNotice({ message, externalSources = [], title = 'Live data unavailable', action }) {
   return (
     <div className="rounded-2xl border border-amber-200/80 bg-amber-50 p-4 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
       <div className="flex items-start gap-3">
@@ -30,6 +31,15 @@ export default function ProviderNotice({ message, externalSources = [], title = 
                 </a>
               ))}
             </div>
+          )}
+          {action && (
+            <button
+              onClick={action.onClick}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-amber-300/70 bg-white px-3 py-1.5 text-xs font-bold text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300"
+            >
+              <RotateCw className="h-3 w-3" />
+              {action.label || 'Retry'}
+            </button>
           )}
         </div>
       </div>

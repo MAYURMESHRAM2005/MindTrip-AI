@@ -3,7 +3,7 @@ import { TRAFFIC_AGENT_PROMPT } from '../prompts/agentPrompts.js';
 import mapsProvider from '../providers/maps.provider.js';
 
 /**
- * Traffic Agent: real Google Directions/Distance Matrix first. When
+ * Traffic Agent: real Geoapify Routing/Matrix data first. When
  * unavailable it clearly marks travel durations as estimates.
  */
 class TrafficAgent extends BaseAgent {
@@ -37,7 +37,7 @@ class TrafficAgent extends BaseAgent {
 
     const result = await this.think({
       prompt: `Destination: ${destination}
-Real directions data from Google Maps:
+Real directions data from Geoapify:
 ${JSON.stringify(providerResult.data, null, 2)}
 Advise on realistic transit and risky legs using this data only.`,
       userId,

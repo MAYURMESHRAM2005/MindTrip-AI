@@ -1,5 +1,5 @@
 import env from '../config/env.js';
-import { live, unavailable, fetchWithTimeout } from './base.provider.js';
+import { live, unavailable, axiosGet } from './base.provider.js';
 
 const BASE = 'https://api.openweathermap.org/data/2.5';
 
@@ -20,6 +20,9 @@ function mapCurrent(d) {
     city: d.name,
     country: d.sys?.country,
     coordinates: { lat: d.coord?.lat, lng: d.coord?.lon },
+    sunrise: d.sys?.sunrise ?? null,
+    sunset: d.sys?.sunset ?? null,
+    timezone: d.timezone ?? 0,
     alerts: (d.alerts || []).map((a) => ({
       event: a.event,
       description: a.description,
@@ -37,8 +40,7 @@ export async function currentWeather({ city, lat, lng, units = 'metric' }) {
     let url = `${BASE}/weather?units=${units}&appid=${env.OPENWEATHER_API_KEY}`;
     if (lat != null && lng != null) url += `&lat=${lat}&lon=${lng}`;
     else url += `&q=${encodeURIComponent(city)}`;
-    const res = await fetchWithTimeout(url, {}, 6000);
-    const data = await res.json();
+    const data = await axiosGet(url, {}, 6000);
     if (data.cod !== 200) {
       return unavailable('openweather', `Weather lookup failed: ${data.message || data.cod}`);
     }
@@ -56,8 +58,7 @@ export async function forecast({ city, lat, lng, units = 'metric', days = 7 }) {
     let url = `${BASE}/forecast?units=${units}&appid=${env.OPENWEATHER_API_KEY}`;
     if (lat != null && lng != null) url += `&lat=${lat}&lon=${lng}`;
     else url += `&q=${encodeURIComponent(city)}`;
-    const res = await fetchWithTimeout(url, {}, 7000);
-    const data = await res.json();
+    const data = await axiosGet(url, {}, 7000);
     if (data.cod !== '200') {
       return unavailable('openweather', `Forecast lookup failed: ${data.message || data.cod}`);
     }

@@ -3,7 +3,7 @@ import { RESTAURANT_AGENT_PROMPT } from '../prompts/agentPrompts.js';
 import placesProvider from '../providers/places.provider.js';
 
 /**
- * Restaurant Agent: real Google Places results first; Gemini builds a meal
+ * Restaurant Agent: real Geoapify Places results first; Gemini builds a meal
  * plan from the provided list only.
  */
 class RestaurantAgent extends BaseAgent {
@@ -33,7 +33,7 @@ class RestaurantAgent extends BaseAgent {
     const result = await this.think({
       prompt: `Destination: ${destination}
 Food preference: ${foodPreference || 'any'}
-Real restaurant data from Google Places:
+Real restaurant data from Geoapify Places:
 ${JSON.stringify(providerResult.data, null, 2)}
 Recommend restaurants matching the preference from this list only.`,
       userId,

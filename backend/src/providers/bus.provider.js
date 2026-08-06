@@ -1,5 +1,5 @@
 import env from '../config/env.js';
-import { live, unavailable, fetchWithTimeout } from './base.provider.js';
+import { live, unavailable, axiosPost } from './base.provider.js';
 
 /**
  * Bus provider - designed to connect to a configured legitimate bus API.
@@ -15,19 +15,17 @@ export async function searchBuses({ from, to, date, passengers = 1 }) {
   }
   try {
     const url = `${env.BUS_API_URL.replace(/\/$/, '')}/search`;
-    const res = await fetchWithTimeout(
+    const data = await axiosPost(
       url,
+      { from, to, date, passengers },
       {
-        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(env.BUS_API_KEY ? { Authorization: `Bearer ${env.BUS_API_KEY}` } : {}),
         },
-        body: JSON.stringify({ from, to, date, passengers }),
       },
       10000
     );
-    const data = await res.json();
     if (!data || !Array.isArray(data.buses)) {
       return unavailable('bus', 'Bus provider returned an unexpected response shape.');
     }

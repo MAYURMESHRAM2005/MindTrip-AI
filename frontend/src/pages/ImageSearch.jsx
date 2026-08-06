@@ -42,7 +42,7 @@ export default function ImageSearch() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader icon={ImageIcon} title="Image Search" subtitle="Upload a photo — Gemini identifies the place, Google Places finds real info." />
+      <PageHeader icon={ImageIcon} title="Image Search" subtitle="Upload a photo — Gemini identifies the place, Geoapify finds real info." />
 
       <div
         className="card flex cursor-pointer flex-col items-center justify-center gap-3 border-2 border-dashed p-10 text-center transition-colors hover:border-brand-400"

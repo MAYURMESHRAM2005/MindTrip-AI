@@ -5,7 +5,7 @@ import placesProvider from '../providers/places.provider.js';
 
 /**
  * Nearby emergency services (hospitals, police, pharmacies, embassies) via
- * Google Places. Live data only - never fabricated.
+ * Geoapify Places. Live data only - never fabricated.
  */
 export const nearby = asyncHandler(async (req, res) => {
   const { lat, lng, radius } = req.query;

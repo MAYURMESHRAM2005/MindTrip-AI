@@ -38,7 +38,7 @@ export default function Emergency() {
 
   const { data: nearbyData, isLoading: nearbyLoading } = useQuery({
     queryKey: ['emergency-nearby', location],
-    queryFn: () => emergencyApi.nearby({ lat: location.lat, lng: location.lng }).then((r) => r.data.data),
+    queryFn: () => emergencyApi.nearby({ lat: location.lat, lng: location.lng }).then((r) => ({ ...r.data.data, _apiMessage: r.data.message })),
     enabled: Boolean(location),
   });
 
@@ -103,7 +103,10 @@ export default function Emergency() {
       )}
 
       {location && !nearbyLoading && nearbyData && !nearbyData.isLive && (
-        <ProviderNotice title="Live data unavailable for emergency services" message="The Google Places provider is not configured. Emergency contacts below still work." />
+        <ProviderNotice
+          title="Live data unavailable for emergency services"
+          message={nearbyData._apiMessage || 'Live emergency services are temporarily unavailable. Your contacts below still work.'}
+        />
       )}
 
       <div className="grid gap-6 lg:grid-cols-2">

@@ -31,7 +31,7 @@ const env = {
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
 
-  GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY || '',
+  GEOAPIFY_API_KEY: process.env.GEOAPIFY_API_KEY || '',
   OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || '',
 
   AMADEUS_CLIENT_ID: process.env.AMADEUS_CLIENT_ID || '',
