@@ -1,0 +1,43 @@
+{
+  "name": "travelmind-frontend",
+  "version": "1.0.0",
+  "description": "TravelMind AI Frontend - React + Vite + Tailwind",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.9.0",
+    "@tanstack/react-query": "^5.51.0",
+    "axios": "^1.7.2",
+    "framer-motion": "^11.3.0",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.441.0",
+    "qrcode.react": "^3.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.52.0",
+    "react-hot-toast": "^2.4.1",
+    "react-leaflet": "^4.2.1",
+    "react-router-dom": "^6.26.0",
+    "recharts": "^2.12.7",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.4.8",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "jsdom": "^24.1.1",
+    "postcss": "^8.4.40",
+    "tailwindcss": "^3.4.7",
+    "vite": "^5.3.5",
+    "vitest": "^2.0.5"
+  }
+}

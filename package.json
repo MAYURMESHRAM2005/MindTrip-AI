@@ -1,0 +1,17 @@
+{
+  "name": "travelmind-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TravelMind AI - AI-Powered Smart Travel Assistant & Planner using Multi-Agent LLM Architecture and Budget Optimizer",
+  "scripts": {
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "test": "cd backend && npm test && cd ../frontend && npm test",
+    "start": "cd backend && npm start"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

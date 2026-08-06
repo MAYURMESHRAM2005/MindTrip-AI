@@ -1,0 +1,24 @@
+{
+  "name": "TravelMind AI - Smart Travel Assistant",
+  "short_name": "TravelMind AI",
+  "description": "AI-powered smart travel assistant & planner with multi-agent LLM architecture and budget optimizer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#257aeb",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

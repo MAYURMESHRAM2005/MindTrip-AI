@@ -1,0 +1,97 @@
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Hotel, Search, Star, MapPin } from 'lucide-react';
+import PageHeader from '../components/ui/PageHeader';
+import { Input, Select } from '../components/ui/Input';
+import Button from '../components/ui/Button';
+import ProviderNotice from '../components/ProviderNotice';
+import { hotelsApi } from '../services/apiClient';
+import { Spinner } from '../components/ui/Spinner';
+import { formatCurrency } from '../utils/format';
+import Badge from '../components/ui/Badge';
+
+export default function Hotels() {
+  const [params, setParams] = useState({
+    city: '', checkIn: '', checkOut: '', adults: 2, rooms: 1, maxPrice: '', minRating: '',
+  });
+  const [search, setSearch] = useState(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['hotels', search],
+    queryFn: () => hotelsApi.search(search).then((r) => r.data.data),
+    enabled: Boolean(search),
+  });
+
+  return (
+    <div>
+      <PageHeader icon={Hotel} title="Hotels" subtitle="Live offers from Amadeus, with Google Places fallback." />
+
+      <div className="card mb-6 p-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Input label="City / destination" placeholder="Goa" value={params.city} onChange={(e) => setParams({ ...params, city: e.target.value })} />
+          <Input label="Check-in" type="date" value={params.checkIn} onChange={(e) => setParams({ ...params, checkIn: e.target.value })} />
+          <Input label="Check-out" type="date" value={params.checkOut} onChange={(e) => setParams({ ...params, checkOut: e.target.value })} />
+          <Input label="Guests" type="number" min={1} value={params.adults} onChange={(e) => setParams({ ...params, adults: Number(e.target.value) || 1 })} />
+          <Input label="Max price / night" type="number" placeholder="5000" value={params.maxPrice} onChange={(e) => setParams({ ...params, maxPrice: e.target.value })} />
+          <Select label="Min rating" value={params.minRating} onChange={(e) => setParams({ ...params, minRating: e.target.value })} options={[{ value: '', label: 'Any' }, { value: '3', label: '3+' }, { value: '4', label: '4+' }, { value: '4.5', label: '4.5+' }]} />
+        </div>
+        <Button className="mt-4" icon={Search} disabled={!params.city || !params.checkIn || !params.checkOut} onClick={() => setSearch({ ...params })}>
+          Search hotels
+        </Button>
+      </div>
+
+      {isLoading && <div className="flex justify-center py-12"><Spinner size="lg" /></div>}
+
+      {data && !data.isLive && (
+        <ProviderNotice
+          title="Live hotel data unavailable"
+          message={data.message || 'Hotel providers are not configured.'}
+          externalSources={[{ name: 'Booking.com', url: 'https://www.booking.com' }, { name: 'MakeMyTrip', url: 'https://www.makemytrip.com' }]}
+        />
+      )}
+
+      {data?.isLive && (
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-emerald-600">
+            ● {data.provider === 'amadeus' ? 'Live offers from Amadeus' : 'Live listings from Google Places'}
+            {data.note && <span className="text-slate-400"> · {data.note}</span>}
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {data.hotels.map((h, i) => (
+              <div key={h.id || i} className="card flex flex-col p-5 transition-all hover:-translate-y-0.5 hover:shadow-card">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 dark:text-white">{h.name || 'Hotel'}</h3>
+                    {h.rating != null && (
+                      <p className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-amber-500">
+                        <Star className="h-3.5 w-3.5 fill-current" /> {h.rating}
+                      </p>
+                    )}
+                  </div>
+                  <Badge tone="green">Live</Badge>
+                </div>
+                {h.address && (
+                  <p className="mb-2 flex items-start gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+                    <MapPin className="mt-0.5 h-3 w-3 shrink-0" /> {h.address}
+                  </p>
+                )}
+                {h.priceLevel != null && <p className="text-xs text-slate-400">{'₹'.repeat(h.priceLevel + 1) || ''} price level</p>}
+                <div className="mt-auto flex items-center justify-between pt-3">
+                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">
+                    {h.price?.amount ? formatCurrency(h.price.amount, h.price.currency || 'INR') : 'Price on request'}
+                    {h.price?.amount && <span className="text-xs font-medium text-slate-400"> /night</span>}
+                  </p>
+                  {h.bookingUrl && (
+                    <a href={h.bookingUrl} target="_blank" rel="noreferrer" className="btn-secondary px-3 py-1.5 text-xs">
+                      Book
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
