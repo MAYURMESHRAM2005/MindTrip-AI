@@ -3,18 +3,34 @@ import { useQuery } from '@tanstack/react-query';
 import { Hotel, Search, Star, MapPin } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Input, Select } from '../components/ui/Input';
+import PlaceAutocomplete from '../components/PlaceAutocomplete';
 import Button from '../components/ui/Button';
 import ProviderNotice from '../components/ProviderNotice';
 import { hotelsApi } from '../services/apiClient';
 import { Spinner } from '../components/ui/Spinner';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, todayISO } from '../utils/format';
 import Badge from '../components/ui/Badge';
 
+function hotelsFromQuery() {
+  const sp = new URLSearchParams(window.location.search);
+  const checkIn = sp.get('checkIn') || todayISO();
+  const checkOut = sp.get('checkOut') || (() => {
+    const d = new Date(checkIn);
+    d.setDate(d.getDate() + 2);
+    return d.toISOString().slice(0, 10);
+  })();
+  return {
+    city: sp.get('city') || '', checkIn, checkOut, adults: 2, rooms: 1, maxPrice: '', minRating: '',
+  };
+}
+
 export default function Hotels() {
-  const [params, setParams] = useState({
-    city: '', checkIn: '', checkOut: '', adults: 2, rooms: 1, maxPrice: '', minRating: '',
+  const [params, setParams] = useState(hotelsFromQuery);
+  // Topbar search (?city=Goa) auto-runs the search on mount.
+  const [search, setSearch] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('city') ? hotelsFromQuery() : null;
   });
-  const [search, setSearch] = useState(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['hotels', search],
@@ -28,9 +44,9 @@ export default function Hotels() {
 
       <div className="card mb-6 p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Input label="City / destination" placeholder="Goa" value={params.city} onChange={(e) => setParams({ ...params, city: e.target.value })} />
-          <Input label="Check-in" type="date" value={params.checkIn} onChange={(e) => setParams({ ...params, checkIn: e.target.value })} />
-          <Input label="Check-out" type="date" value={params.checkOut} onChange={(e) => setParams({ ...params, checkOut: e.target.value })} />
+          <PlaceAutocomplete label="City / destination" placeholder="Goa" value={params.city} onChange={(city) => setParams({ ...params, city })} />
+          <Input label="Check-in" type="date" min={todayISO()} value={params.checkIn} onChange={(e) => setParams({ ...params, checkIn: e.target.value })} />
+          <Input label="Check-out" type="date" min={params.checkIn || todayISO()} value={params.checkOut} onChange={(e) => setParams({ ...params, checkOut: e.target.value })} />
           <Input label="Guests" type="number" min={1} value={params.adults} onChange={(e) => setParams({ ...params, adults: Number(e.target.value) || 1 })} />
           <Input label="Max price / night" type="number" placeholder="5000" value={params.maxPrice} onChange={(e) => setParams({ ...params, maxPrice: e.target.value })} />
           <Select label="Min rating" value={params.minRating} onChange={(e) => setParams({ ...params, minRating: e.target.value })} options={[{ value: '', label: 'Any' }, { value: '3', label: '3+' }, { value: '4', label: '4+' }, { value: '4.5', label: '4.5+' }]} />

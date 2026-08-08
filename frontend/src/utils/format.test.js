@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatCurrency, formatDate, daysBetween, initials, cn, toQueryString } from './format';
+import { formatCurrency, formatDate, daysBetween, initials, cn, toQueryString, todayISO } from './format';
 
 describe('formatCurrency', () => {
   it('formats INR amounts', () => {
@@ -10,6 +10,15 @@ describe('formatCurrency', () => {
     expect(formatCurrency(null)).toBe('—');
     expect(formatCurrency(undefined)).toBe('—');
     expect(formatCurrency(NaN)).toBe('—');
+  });
+});
+
+describe('todayISO', () => {
+  it('returns today as YYYY-MM-DD in local time', () => {
+    const value = todayISO();
+    expect(value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const d = new Date(value);
+    expect(Number.isNaN(d.getTime())).toBe(false);
   });
 });
 

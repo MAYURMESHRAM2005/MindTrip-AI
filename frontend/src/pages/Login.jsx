@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
 import { authApi } from '../services/apiClient';
+import { signInWithGoogle } from '../services/firebase';
 import { useAuthStore } from '../store/authStore';
 import { errorMessage } from '../services/api';
 import { Input } from '../components/ui/Input';
@@ -19,10 +20,9 @@ const schema = z.object({
 export default function Login() {
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const oauthSuccess = params.get('oauth') === 'success';
 
   const { register, handleSubmit, formState: { errors } } = useForm({ resolver: zodResolver(schema) });
 
@@ -40,8 +40,22 @@ export default function Login() {
     }
   };
 
-  const handleGoogle = () => {
-    window.location.href = '/api/auth/google';
+  const handleGoogle = async () => {
+    setOauthLoading(true);
+    try {
+      const idToken = await signInWithGoogle();
+      const { data } = await authApi.firebaseToken(idToken);
+      login({ user: data.data.user, accessToken: data.data.accessToken || null });
+      toast.success('Welcome back!');
+      navigate('/dashboard');
+    } catch (err) {
+      // Silently reset when the user simply closes the Google popup.
+      if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
+        toast.error(errorMessage(err, 'Google sign-in failed'));
+      }
+    } finally {
+      setOauthLoading(false);
+    }
   };
 
   return (
@@ -54,11 +68,6 @@ export default function Login() {
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Sign in to plan your next trip</p>
       </div>
 
-      {oauthSuccess && (
-        <div className="mb-4 rounded-xl bg-emerald-50 p-3 text-center text-sm font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400">
-          Google sign-in successful!
-        </div>
-      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <Input label="Email" type="email" placeholder="you@example.com" error={errors.email?.message} {...register('email')} />
@@ -94,7 +103,7 @@ export default function Login() {
         <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
       </div>
 
-      <Button variant="outline" className="w-full" onClick={handleGoogle}>
+      <Button variant="outline" className="w-full" onClick={handleGoogle} loading={oauthLoading} disabled={oauthLoading}>
         <svg className="h-4 w-4" viewBox="0 0 24 24">
           <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" />
           <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />

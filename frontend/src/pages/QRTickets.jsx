@@ -11,7 +11,7 @@ import toast from 'react-hot-toast';
 import { errorMessage } from '../services/api';
 import { PageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
-import { formatDate } from '../utils/format';
+import { formatDate, todayISO } from '../utils/format';
 import Badge from '../components/ui/Badge';
 
 const CATEGORY_ICON = { flight: Plane, train: TrainFront, bus: Bus, hotel: Hotel, attraction: TicketIcon };
@@ -114,7 +114,7 @@ export default function QRTickets() {
           <Input label="Title" placeholder="Air India 6E 204" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
           <Input label="Provider (optional)" placeholder="Air India / IRCTC / Booking.com" value={form.provider} onChange={(e) => setForm({ ...form, provider: e.target.value })} />
           <Input label="Booking reference (your own)" placeholder="PNR / booking ID" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
-          <Input label="Travel date" type="date" value={form.travelDate} onChange={(e) => setForm({ ...form, travelDate: e.target.value })} />
+          <Input label="Travel date" type="date" min={todayISO()} value={form.travelDate} onChange={(e) => setForm({ ...form, travelDate: e.target.value })} />
           <Input label="Details (optional)" placeholder="Passenger name, seat, amount…" value={form.details} onChange={(e) => setForm({ ...form, details: e.target.value })} />
           <Button
             className="w-full"

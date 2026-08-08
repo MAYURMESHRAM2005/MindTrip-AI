@@ -1,19 +1,31 @@
 import React, { useState } from 'react';
-import { Outlet } from 'react-router-dom';
-import { Menu, Bell, Moon, Sun, Search } from 'lucide-react';
+import { Outlet, Link, useNavigate } from 'react-router-dom';
+import { Menu, Bell, Moon, Sun, LogOut } from 'lucide-react';
 import Sidebar from './Sidebar';
+import GlobalSearch from '../GlobalSearch';
 import { useThemeStore } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
 import { useQuery } from '@tanstack/react-query';
 import { notificationsApi } from '../../services/apiClient';
-import { Link } from 'react-router-dom';
 import useOnline from '../../hooks/useOnline';
+import { useI18n } from '../../utils/i18n';
 
 export default function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { theme, toggle } = useThemeStore();
   const online = useOnline();
   const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
+  const navigate = useNavigate();
+  const { t } = useI18n();
+
+  const handleLogout = () => {
+    // Fire-and-forget: the store clears state immediately regardless of the
+    // API result, so we don't block redirect on a slow/offline network.
+    logout();
+    navigate('/login', { replace: true });
+  };
+
 
   const { data: notifData } = useQuery({
     queryKey: ['notifications'],
@@ -29,16 +41,15 @@ export default function MainLayout() {
       <div className="lg:pl-64">
         {/* Topbar */}
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/80 sm:px-6">
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 lg:hidden"
+              className="shrink-0 rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 lg:hidden"
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div className="hidden items-center gap-2 rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-400 dark:bg-slate-800 sm:flex">
-              <Search className="h-4 w-4" />
-              <span>Search destinations, hotels, flights…</span>
+            <div className="min-w-0 flex-1 sm:max-w-md">
+              <GlobalSearch />
             </div>
           </div>
 
@@ -77,6 +88,14 @@ export default function MainLayout() {
             >
               {user?.profileImage ? <img src={user.profileImage} alt="" className="h-9 w-9 rounded-full object-cover" /> : (user?.name || 'T')[0]?.toUpperCase()}
             </Link>
+            <button
+              onClick={handleLogout}
+              title={t('logout')}
+              aria-label={t('logout')}
+              className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:text-slate-300 dark:hover:bg-rose-950/50 dark:hover:text-rose-400 lg:hidden"
+            >
+              <LogOut className="h-5 w-5" />
+            </button>
           </div>
         </header>
 

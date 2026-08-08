@@ -7,6 +7,7 @@ import AIConversation from '../models/AIConversation.js';
 import Expense from '../models/Expense.js';
 import orchestrator from '../orchestrator/tripOrchestrator.js';
 import pdfService from '../services/pdf.service.js';
+import budgetService from '../services/budget.service.js';
 import geminiService from '../services/gemini.service.js';
 import chatService from '../services/chat.service.js';
 import { sanitizeText } from '../utils/sanitize.js';
@@ -73,6 +74,22 @@ export const downloadPdf = asyncHandler(async (req, res) => {
   if (!itinerary) throw ApiError.notFound('Itinerary not found');
   const buffer = await pdfService.buildItineraryPdf({ trip, itinerary });
   const filename = `itinerary-${trip.destination.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.pdf`;
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(buffer);
+});
+
+export const downloadBudgetPdf = asyncHandler(async (req, res) => {
+  const trip = await Trip.findOne({ _id: req.params.id, user: req.user._id });
+  if (!trip) throw ApiError.notFound('Trip not found');
+  const itinerary = await Itinerary.findOne({ trip: trip._id });
+  if (!itinerary) throw ApiError.notFound('Itinerary not found');
+  const expenses = await Expense.find({ trip: trip._id, user: req.user._id });
+  const allocation =
+    itinerary.budgetAllocation ||
+    budgetService.allocationForStyle(trip.preferences?.travelStyle || 'standard', trip.budget.total);
+  const buffer = await pdfService.buildBudgetPdf({ trip, itinerary, allocation, expenses });
+  const filename = `budget-${trip.destination.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.pdf`;
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send(buffer);
@@ -156,6 +173,7 @@ export default {
   getItinerary,
   optimizeBudget,
   downloadPdf,
+  downloadBudgetPdf,
   moveActivity,
   replaceHotel,
   makeCheaper,

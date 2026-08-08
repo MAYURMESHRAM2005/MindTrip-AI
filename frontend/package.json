@@ -14,6 +14,7 @@
     "@hookform/resolvers": "^3.9.0",
     "@tanstack/react-query": "^5.51.0",
     "axios": "^1.7.2",
+    "firebase": "^12.17.1",
     "framer-motion": "^11.3.0",
     "leaflet": "^1.9.4",
     "leaflet-defaulticon-compatibility": "^0.1.2",

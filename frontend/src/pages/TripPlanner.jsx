@@ -8,12 +8,13 @@ import {
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Input, Select, Field } from '../components/ui/Input';
+import PlaceAutocomplete from '../components/PlaceAutocomplete';
 import Button from '../components/ui/Button';
 import AgentPipeline from '../components/AgentPipeline';
 import { tripApi } from '../services/apiClient';
 import { errorMessage } from '../services/api';
 import { TRAVEL_STYLES, CURRENCIES, INTERESTS } from '../constants';
-import { cn } from '../utils/format';
+import { cn, todayISO } from '../utils/format';
 
 const STEPS = [
   { key: 'where', title: 'Where & when', icon: MapPin },
@@ -44,9 +45,21 @@ const initialForm = {
   title: '',
 };
 
+/** Prefill from the topbar global search (?destination=…&from=…). */
+function formFromQuery() {
+  const sp = new URLSearchParams(window.location.search);
+  const destination = sp.get('destination') || '';
+  return {
+    ...initialForm,
+    destination,
+    origin: sp.get('from') || initialForm.origin,
+    ...(destination ? { suggestDestination: false } : {}),
+  };
+}
+
 export default function TripPlanner() {
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(formFromQuery);
   const [generating, setGenerating] = useState(false);
   const [pipelineDone, setPipelineDone] = useState(false);
   const navigate = useNavigate();
@@ -138,15 +151,15 @@ export default function TripPlanner() {
             {step === 0 && (
               <div className="space-y-5">
                 <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">Where are you going?</h2>
-                <Input label="Starting city" placeholder="Mumbai" value={form.origin} onChange={(e) => set({ origin: e.target.value })} />
+                <PlaceAutocomplete label="Starting city" placeholder="Mumbai" value={form.origin} onChange={(v) => set({ origin: v })} />
                 <Field label="Destination" hint={form.suggestDestination ? 'The Destination Agent will suggest one' : ''}>
                   <div className="flex flex-col gap-3 sm:flex-row">
-                    <input
-                      className="input"
+                    <PlaceAutocomplete
                       placeholder="Goa / Paris / Tokyo…"
                       value={form.destination}
                       disabled={form.suggestDestination}
-                      onChange={(e) => set({ destination: e.target.value })}
+                      wrapperClassName="flex-1 min-w-0"
+                      onChange={(v) => set({ destination: v })}
                     />
                     <button
                       type="button"
@@ -158,8 +171,8 @@ export default function TripPlanner() {
                   </div>
                 </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Input label="Departure date" type="date" value={form.startDate} onChange={(e) => set({ startDate: e.target.value })} />
-                  <Input label="Return date" type="date" value={form.endDate} onChange={(e) => set({ endDate: e.target.value })} />
+                  <Input label="Departure date" type="date" min={todayISO()} value={form.startDate} onChange={(e) => set({ startDate: e.target.value })} />
+                  <Input label="Return date" type="date" min={form.startDate || todayISO()} value={form.endDate} onChange={(e) => set({ endDate: e.target.value })} />
                 </div>
                 <Input label="Trip title (optional)" placeholder="Goa Summer Getaway" value={form.title} onChange={(e) => set({ title: e.target.value })} />
               </div>

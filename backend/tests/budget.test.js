@@ -5,6 +5,9 @@ import {
   allocationForStyle,
   sumCosts,
   optimizeCosts,
+  roomsForParty,
+  budgetUtilization,
+  planDailyBudgets,
 } from '../src/services/budget.service.js';
 
 test('allocateBudget parts always sum to the total', () => {
@@ -77,4 +80,37 @@ test('optimizeCosts with no overspend leaves everything untouched', () => {
   assert.equal(result.dropped.length, 0);
   assert.equal(result.saved, 0);
   assert.equal(result.withinBudget, true);
+});
+
+test('roomsForParty computes rooms from occupancy', () => {
+  assert.equal(roomsForParty({ adults: 1, children: 0 }), 1);
+  assert.equal(roomsForParty({ adults: 2, children: 0 }), 1);
+  assert.equal(roomsForParty({ adults: 4, children: 0 }), 2);
+  assert.equal(roomsForParty({ adults: 5, children: 0 }), 3);
+  assert.equal(roomsForParty({ adults: 0, children: 4 }), 2);
+  assert.equal(roomsForParty({ adults: 0, children: 0 }), 1);
+});
+
+test('budgetUtilization reports used %, remaining and withinBudget', () => {
+  const u = budgetUtilization({ total: 50000, spent: 46800 });
+  assert.equal(u.remaining, 3200);
+  assert.equal(u.usedPct, 93.6);
+  assert.equal(u.withinBudget, true);
+  const over = budgetUtilization({ total: 1000, spent: 1500 });
+  assert.equal(over.withinBudget, false);
+  assert.equal(over.remaining, -500);
+  assert.equal(over.usedPct, 100);
+});
+
+test('planDailyBudgets spreads categories across days and nights', () => {
+  const plan = planDailyBudgets({
+    allocation: { hotels: { amount: 15000 }, food: { amount: 10000 }, transport: { amount: 10000 }, activities: { amount: 7000 }, misc: { amount: 3000 } },
+    daysCount: 5,
+    nights: 4,
+    rooms: 2,
+  });
+  assert.equal(plan.perDay.food, 2000);
+  assert.equal(plan.perDay.activities, 1400);
+  assert.equal(plan.perDay.hotelPerRoomNight, 1875); // 15000 / 4 nights / 2 rooms
+  assert.equal(plan.totals.hotels, 15000);
 });

@@ -13,7 +13,7 @@ import {
 } from '../utils/token.js';
 import env from '../config/env.js';
 import emailService from './email.service.js';
-import logger from '../utils/logger.js';
+import { verifyFirebaseIdToken } from './firebase.service.js';
 
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -161,71 +161,35 @@ export async function resetPassword(token, newPassword) {
 }
 
 /**
- * Google OAuth: verify the id_token issued by Google's consent screen.
+ * Firebase Auth: verify the ID token minted by the Firebase client SDK after
+ * Google sign-in, then find-or-create the local user and issue our own
+ * session tokens (JWT access/refresh httpOnly cookies remain unchanged).
  */
-async function verifyGoogleIdToken(idToken) {
-  const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
-  if (!res.ok) throw ApiError.unauthorized('Invalid Google token');
-  const data = await res.json();
-  if (!data.email || !data.sub) throw ApiError.unauthorized('Invalid Google token');
-  return data;
-}
+export async function firebaseLogin(idToken, req) {
+  const info = await verifyFirebaseIdToken(idToken);
+  if (!info.email) throw ApiError.unauthorized('Google account has no email');
 
-export async function googleLogin(idToken, req) {
-  const info = await verifyGoogleIdToken(idToken);
   let user = await User.findOne({ email: info.email });
   if (!user) {
     user = await User.create({
-      name: info.name || info.email.split('@')[0],
+      name: info.name || info.email.split('@')[0] || 'Traveler',
       email: info.email,
-      googleId: info.sub,
+      firebaseUid: info.uid,
       emailVerified: Boolean(info.email_verified),
       profileImage: info.picture || '',
     });
     await UserPreference.create({ user: user._id, currency: 'INR', language: 'en' });
-  } else if (!user.googleId) {
-    user.googleId = info.sub;
+  } else if (user.firebaseUid && user.firebaseUid !== info.uid) {
+    // Same email but a different Firebase account: never silently switch sessions.
+    throw ApiError.unauthorized('This email is linked to a different account');
+  } else if (!user.firebaseUid) {
+    user.firebaseUid = info.uid;
     user.emailVerified = Boolean(info.email_verified);
     if (info.picture && !user.profileImage) user.profileImage = info.picture;
     await user.save({ validateBeforeSave: false });
   }
   const { accessToken, refreshToken } = await issueTokens(user, req);
   return { user: publicUser(user), accessToken, refreshToken };
-}
-
-/**
- * Build the Google OAuth consent URL for the server-side redirect flow.
- */
-export function googleAuthUrl(state) {
-  const params = new URLSearchParams({
-    client_id: env.GOOGLE_CLIENT_ID,
-    redirect_uri: env.GOOGLE_REDIRECT_URL,
-    response_type: 'code',
-    scope: 'openid email profile',
-    access_type: 'online',
-    prompt: 'select_account',
-    ...(state ? { state } : {}),
-  });
-  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
-}
-
-export async function googleCallback(code) {
-  // Exchange the authorization code for tokens
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code,
-      client_id: env.GOOGLE_CLIENT_ID,
-      client_secret: env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: env.GOOGLE_REDIRECT_URL,
-      grant_type: 'authorization_code',
-    }),
-  });
-  const tokenData = await tokenRes.json();
-  if (!tokenData.id_token) throw ApiError.unauthorized('Google OAuth exchange failed');
-  const info = await verifyGoogleIdToken(tokenData.id_token);
-  return { info, access_token: tokenData.access_token };
 }
 
 export function setAuthCookies(res, accessToken, refreshToken) {
@@ -258,9 +222,7 @@ export default {
   verifyEmail,
   forgotPassword,
   resetPassword,
-  googleLogin,
-  googleAuthUrl,
-  googleCallback,
+  firebaseLogin,
   setAuthCookies,
   clearAuthCookies,
   publicUser,

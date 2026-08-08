@@ -15,7 +15,7 @@ const userSchema = new mongoose.Schema(
     password: { type: String, select: false },
     role: { type: String, enum: Object.values(ROLES), default: ROLES.USER, index: true },
     profileImage: { type: String, default: '' },
-    googleId: { type: String, unique: true, sparse: true },
+    firebaseUid: { type: String, unique: true, sparse: true },
     emailVerified: { type: Boolean, default: false },
     verifyToken: { type: String, select: false },
     verifyTokenExpires: { type: Date, select: false },

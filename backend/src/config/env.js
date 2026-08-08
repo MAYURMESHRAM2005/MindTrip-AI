@@ -23,10 +23,10 @@ const env = {
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   COOKIE_SECURE: process.env.COOKIE_SECURE === 'true',
 
-  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
-  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
-  GOOGLE_REDIRECT_URL:
-    process.env.GOOGLE_REDIRECT_URL || 'http://localhost:5000/api/auth/google/callback',
+  FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || '',
+  // Service account JSON string (preferred) or path to a serviceAccountKey.json
+  FIREBASE_SERVICE_ACCOUNT: process.env.FIREBASE_SERVICE_ACCOUNT || '',
+  FIREBASE_SERVICE_ACCOUNT_PATH: process.env.FIREBASE_SERVICE_ACCOUNT_PATH || '',
 
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
@@ -34,14 +34,20 @@ const env = {
   GEOAPIFY_API_KEY: process.env.GEOAPIFY_API_KEY || '',
   OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || '',
 
+  AVIATIONSTACK_API_KEY: process.env.AVIATIONSTACK_API_KEY || '',
+
+  // Amadeus is used for HOTELS only (flights use AviationStack).
   AMADEUS_CLIENT_ID: process.env.AMADEUS_CLIENT_ID || '',
   AMADEUS_CLIENT_SECRET: process.env.AMADEUS_CLIENT_SECRET || '',
   AMADEUS_ENV: process.env.AMADEUS_ENV || 'test',
 
   TRAIN_API_URL: process.env.TRAIN_API_URL || '',
   TRAIN_API_KEY: process.env.TRAIN_API_KEY || '',
+  // Path of the train search endpoint (RapidAPI: copy from the API docs)
+  TRAIN_API_ENDPOINT: process.env.TRAIN_API_ENDPOINT || '/search',
   BUS_API_URL: process.env.BUS_API_URL || '',
   BUS_API_KEY: process.env.BUS_API_KEY || '',
+  BUS_API_ENDPOINT: process.env.BUS_API_ENDPOINT || '/search',
 
   UNSPLASH_ACCESS_KEY: process.env.UNSPLASH_ACCESS_KEY || '',
 

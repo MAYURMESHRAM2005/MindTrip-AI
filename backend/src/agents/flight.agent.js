@@ -3,7 +3,7 @@ import { FLIGHT_AGENT_PROMPT } from '../prompts/agentPrompts.js';
 import flightProvider from '../providers/flight.provider.js';
 
 /**
- * Flight Agent: real Amadeus offers first; Gemini selects the best option.
+ * Flight Agent: real AviationStack data first; Gemini selects the best option.
  * No AI output is ever treated as a real schedule or price.
  */
 class FlightAgent extends BaseAgent {
@@ -35,9 +35,9 @@ class FlightAgent extends BaseAgent {
 
     const result = await this.think({
       prompt: `Route: ${origin} → ${destination}, depart ${departDate}${returnDate ? `, return ${returnDate}` : ''}, ${adults} adult(s), class ${travelClass}.
-Real flight offers from Amadeus:
+Real flight data from AviationStack (prices are not provided by the feed):
 ${JSON.stringify(providerResult.data, null, 2)}
-Select the best offer and list alternatives from this data only.`,
+Select the best option and list alternatives from this data only.`,
       userId,
       action: 'flightSelect',
       data: { flights: providerResult.data },

@@ -8,7 +8,7 @@ import {
   loginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
-  googleSchema,
+  firebaseSchema,
 } from '../validators/auth.validator.js';
 
 const router = Router();
@@ -22,10 +22,7 @@ router.get('/verify-email/:token', authController.verifyEmail);
 router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), authController.forgotPassword);
 router.post('/reset-password/:token', authLimiter, validate(resetPasswordSchema), authController.resetPassword);
 
-// Google OAuth (server-side redirect flow)
-router.get('/google', authController.googleRedirect);
-router.get('/google/callback', authController.googleCallback);
-// Alternative: verify Google id_token sent from the client
-router.post('/google/token', validate(googleSchema), authController.googleToken);
+// Firebase Auth: verify the ID token sent from the client after Google sign-in
+router.post('/firebase/token', validate(firebaseSchema), authController.firebaseToken);
 
 export default router;

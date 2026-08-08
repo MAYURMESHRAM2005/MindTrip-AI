@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { CloudSun, Search, Droplets, Wind, Umbrella, ThermometerSun, Gauge, Eye, Sunrise, Sunset } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
-import { Input } from '../components/ui/Input';
+import PlaceAutocomplete from '../components/PlaceAutocomplete';
 import Button from '../components/ui/Button';
 import ProviderNotice from '../components/ProviderNotice';
 import { Spinner } from '../components/ui/Spinner';
@@ -20,7 +20,7 @@ function Stat({ icon: Icon, color, label, value }) {
 }
 
 export default function Weather() {
-  const [city, setCity] = useState('');
+  const [city, setCity] = useState(() => new URLSearchParams(window.location.search).get('city') || '');
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get('city') || 'Goa');
 
   const { data: current } = useQuery({
@@ -42,7 +42,7 @@ export default function Weather() {
       <PageHeader icon={CloudSun} title="Weather" subtitle="Live forecasts from OpenWeatherMap." />
 
       <div className="mb-6 flex max-w-md gap-2">
-        <Input placeholder="City, e.g. Goa" value={city} onKeyDown={(e) => e.key === 'Enter' && setSearch(city)} onChange={(e) => setCity(e.target.value)} />
+        <PlaceAutocomplete placeholder="City, e.g. Goa" value={city} onKeyDown={(e) => e.key === 'Enter' && setSearch(city)} onChange={setCity} onSelect={(s) => setSearch(s.name || s.formatted || '')} />
         <Button icon={Search} onClick={() => setSearch(city)}>Check</Button>
       </div>
 

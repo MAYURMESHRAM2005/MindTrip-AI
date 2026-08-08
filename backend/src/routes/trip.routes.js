@@ -24,6 +24,7 @@ router.delete('/:id', validate(tripIdParams, 'params'), tripController.deleteTri
 router.get('/:id/itinerary', validate(tripIdParams, 'params'), tripController.getItinerary);
 router.post('/:id/optimize-budget', aiLimiter, validate(tripIdParams, 'params'), tripController.optimizeBudget);
 router.get('/:id/pdf', validate(tripIdParams, 'params'), tripController.downloadPdf);
+router.get('/:id/budget-pdf', validate(tripIdParams, 'params'), tripController.downloadBudgetPdf);
 router.post('/:id/activities/move', validate(tripIdParams, 'params'), validate(moveActivitySchema), tripController.moveActivity);
 router.post('/:id/replace-hotel', aiLimiter, validate(tripIdParams, 'params'), tripController.replaceHotel);
 router.post('/:id/make-cheaper', aiLimiter, validate(tripIdParams, 'params'), tripController.makeCheaper);

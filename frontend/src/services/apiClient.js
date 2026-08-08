@@ -12,7 +12,7 @@ export const authApi = {
   forgotPassword: (email) => api.post('/auth/forgot-password', { email }),
   resetPassword: (token, password) => api.post(`/auth/reset-password/${token}`, { password }),
   verifyEmail: (token) => api.get(`/auth/verify-email/${token}`),
-  googleToken: (idToken) => api.post('/auth/google/token', { idToken }),
+  firebaseToken: (idToken) => api.post('/auth/firebase/token', { idToken }),
 };
 
 export const userApi = {
@@ -36,6 +36,7 @@ export const tripApi = {
   replaceHotel: (id) => api.post(`/trips/${id}/replace-hotel`),
   moveActivity: (id, payload) => api.post(`/trips/${id}/activities/move`, payload),
   pdfUrl: (id) => `/api/trips/${id}/pdf`,
+  budgetPdfUrl: (id) => `/api/trips/${id}/budget-pdf`,
   chat: (id, payload) => api.post(`/trips/${id}/chat`, payload),
 };
 
@@ -71,6 +72,7 @@ export const placesApi = {
 
 export const mapsApi = {
   geocode: (address) => api.get('/maps/geocode', { params: { address } }),
+  autocomplete: (params) => api.get('/maps/autocomplete', { params }),
   directions: (params) => api.get('/maps/directions', { params }),
   nearby: (params) => api.get('/maps/nearby', { params }),
 };

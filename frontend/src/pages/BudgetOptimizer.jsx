@@ -1,18 +1,21 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
   Wallet, TrendingDown, PiggyBank, AlertTriangle, Wand2, CheckCircle2, RefreshCw,
+  Receipt, Target, Compass, CalendarRange, Download,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import TripSelect from '../components/TripSelect';
-import { tripApi } from '../services/apiClient';
+import StatCard from '../components/ui/StatCard';
+import { tripApi, expensesApi } from '../services/apiClient';
 import { errorMessage } from '../services/api';
 import { PageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
 import toast from 'react-hot-toast';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, daysBetween } from '../utils/format';
+import useTripId from '../hooks/useTripId';
 
 const CATEGORY_LABELS = {
   transport: 'Transportation', flights: 'Flights', train: 'Train', bus: 'Bus',
@@ -20,21 +23,267 @@ const CATEGORY_LABELS = {
   tickets: 'Tickets', shopping: 'Shopping', misc: 'Miscellaneous', emergencyReserve: 'Emergency reserve',
 };
 
-function AllocationBar({ label, amount, total, color, isEstimate }) {
+// Map recorded expense categories back to the allocation buckets so we can
+// compare what was planned for a category against what was actually spent.
+const EXPENSE_TO_ALLOC = {
+  food: 'food',
+  hotel: 'hotels',
+  transport: 'transport',
+  tickets: 'activities',
+  activities: 'activities',
+  shopping: 'misc',
+  other: 'misc',
+};
+
+function buildSpentByAlloc(summary) {
+  const spentByAlloc = {};
+  Object.entries(summary?.byCategory || {}).forEach(([cat, amt]) => {
+    const bucket = EXPENSE_TO_ALLOC[cat] || 'misc';
+    spentByAlloc[bucket] = (spentByAlloc[bucket] || 0) + amt;
+  });
+  return spentByAlloc;
+}
+
+function AllocationBar({ label, amount, spent, total, color, isEstimate }) {
   const pct = total > 0 ? Math.round((amount / total) * 100) : 0;
+  const spentPct = total > 0 && spent > 0 ? Math.round((Math.min(spent, amount) / total) * 100) : 0;
+  const overSpent = spent > amount;
   return (
     <div>
       <div className="mb-1 flex items-center justify-between text-xs">
-        <span className="font-semibold text-slate-600 dark:text-slate-300">{label} {isEstimate && <span className="text-amber-500">(est.)</span>}</span>
-        <span className="font-bold text-slate-800 dark:text-slate-100">{formatCurrency(amount)} <span className="text-slate-400">· {pct}%</span></span>
+        <span className="font-semibold text-slate-600 dark:text-slate-300">
+          {label} {isEstimate && <span className="text-amber-500">(est.)</span>}
+        </span>
+        <span className="font-bold text-slate-800 dark:text-slate-100">
+          {formatCurrency(amount)} <span className="text-slate-400">· {pct}%</span>
+          {spent > 0 && (
+            <span className={`ml-2 ${overSpent ? 'text-rose-500' : 'text-emerald-500'}`}>
+              {formatCurrency(spent)} spent
+            </span>
+          )}
+        </span>
       </div>
-      <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+      <div className="relative h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${pct}%` }}
           transition={{ duration: 0.6 }}
-          className={`h-full rounded-full bg-gradient-to-r ${color}`}
+          className={`h-full rounded-full bg-gradient-to-r ${color} opacity-40`}
         />
+        {spentPct > 0 && (
+          <motion.div
+            initial={{ width: 0 }}
+            animate={{ width: `${spentPct}%` }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className={`absolute top-0 h-full rounded-full bg-gradient-to-r ${color}`}
+            title={`${formatCurrency(spent)} spent`}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function OptimizationPanel({ result, currency, optimizing, onRun }) {
+  if (!result) {
+    return (
+      <div className="card flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <PiggyBank className="h-12 w-12 text-slate-300 dark:text-slate-600" />
+        <p className="max-w-xs text-sm text-slate-500 dark:text-slate-400">
+          Run the optimizer to see the original vs optimized cost, money saved and remaining budget.
+        </p>
+        <button onClick={onRun} disabled={optimizing} className="btn-primary mt-2">
+          {optimizing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+          {optimizing ? 'Optimizing…' : 'Run Budget Agent optimization'}
+        </button>
+      </div>
+    );
+  }
+
+  const { original, optimized, saved, remaining, withinBudget, dropped = [], reductions = [] } = result;
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+      <div className="card p-6">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-500 dark:bg-emerald-950">
+            <PiggyBank className="h-6 w-6" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-slate-900 dark:text-white">Optimization complete</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Original {formatCurrency(original, currency)} → Optimized {formatCurrency(optimized, currency)}
+            </p>
+          </div>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+            <p className="text-[11px] font-semibold uppercase text-slate-400">Money saved</p>
+            <p className="text-lg font-extrabold text-emerald-500">{formatCurrency(saved, currency)}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+            <p className="text-[11px] font-semibold uppercase text-slate-400">Remaining</p>
+            <p className="text-lg font-extrabold text-slate-900 dark:text-white">{formatCurrency(remaining, currency)}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
+            <p className="text-[11px] font-semibold uppercase text-slate-400">Status</p>
+            <p className={`text-lg font-extrabold ${withinBudget ? 'text-emerald-500' : 'text-rose-500'}`}>
+              {withinBudget ? 'In budget' : 'Over'}
+            </p>
+          </div>
+        </div>
+        {result.notes && <p className="mt-3 text-xs text-slate-400">{result.notes}</p>}
+      </div>
+
+      {dropped.length > 0 && (
+        <div className="card p-5">
+          <p className="mb-2 flex items-center gap-2 text-sm font-extrabold text-slate-900 dark:text-white">
+            <TrendingDown className="h-4 w-4 text-rose-500" /> Removed to fit budget
+          </p>
+          <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-300">
+            {dropped.map((d, i) => (
+              <li key={i} className="flex justify-between rounded-lg bg-rose-50 px-3 py-1.5 dark:bg-rose-950/40">
+                <span>{CATEGORY_LABELS[d.category] || d.category} item</span>
+                <span className="font-bold">−{formatCurrency(d.amount, currency)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {reductions.length > 0 && (
+        <div className="card p-5">
+          <p className="mb-2 flex items-center gap-2 text-sm font-extrabold text-slate-900 dark:text-white">
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Reduced costs
+          </p>
+          <ul className="space-y-1.5 text-sm text-slate-600 dark:text-slate-300">
+            {reductions.slice(0, 6).map((r, i) => (
+              <li key={i} className="rounded-lg bg-emerald-50 px-3 py-1.5 dark:bg-emerald-950/40">
+                <span className="font-semibold">{CATEGORY_LABELS[r.category] || r.category}:</span>{' '}
+                {formatCurrency(r.from, currency)} → {formatCurrency(r.to, currency)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {!withinBudget && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
+          <p className="text-amber-800 dark:text-amber-300">
+            Even after optimization this trip exceeds the budget. Try cheaper dates, a nearer destination,
+            or ask the chatbot to “make my trip cheaper”.
+          </p>
+        </div>
+      )}
+
+      <button onClick={onRun} disabled={optimizing} className="btn-primary w-full">
+        {optimizing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
+        {optimizing ? 'Optimizing…' : 'Re-run Budget Agent optimization'}
+      </button>
+    </motion.div>
+  );
+}
+
+function SpendingVsPlan({ allocation, summary, currency, tripId }) {
+  const spentByAlloc = buildSpentByAlloc(summary);
+
+  const rows = allocation
+    .filter((a) => a.key !== 'emergencyReserve')
+    .map((a) => ({
+      key: a.key,
+      label: CATEGORY_LABELS[a.key] || a.key,
+      allocated: a.amount,
+      spent: spentByAlloc[a.key] || 0,
+    }));
+
+  const hasSpending = Object.keys(summary?.byCategory || {}).length > 0;
+  if (!hasSpending) {
+    return (
+      <div className="card p-5">
+        <h3 className="mb-1 text-sm font-extrabold text-slate-900 dark:text-white">Spending vs plan</h3>
+        <p className="text-xs text-slate-400">Planned allocation per category.</p>
+        <EmptyState
+          icon={Receipt}
+          title="No expenses recorded yet"
+          message="Add expenses on the Expense Tracker to compare actual spending against this plan."
+        >
+          <Link to={`/expenses?trip=${tripId || ''}`} className="btn-secondary mt-3">
+            <Receipt className="h-4 w-4" /> Track expenses
+          </Link>
+        </EmptyState>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">Spending vs plan</h3>          <Link to={`/expenses?trip=${tripId || ''}`} className="text-xs font-bold text-brand-600 hover:underline dark:text-brand-400">
+            Open Expense Tracker →
+          </Link>
+      </div>
+      <div className="space-y-2.5">
+        {rows.map((r) => {
+          const delta = r.allocated - r.spent;
+          const over = delta < 0;
+          const caution = !over && r.spent > r.allocated * 0.9;
+          return (
+            <div key={r.key} className="flex items-center justify-between rounded-xl bg-slate-50 px-3.5 py-2.5 dark:bg-slate-800/60">
+              <div>
+                <p className="text-sm font-bold text-slate-800 dark:text-slate-100">{r.label}</p>
+                <p className="text-[11px] text-slate-400">
+                  {formatCurrency(r.spent, currency)} of {formatCurrency(r.allocated, currency)} allocated
+                </p>
+              </div>
+              {over ? (
+                <span className="badge bg-rose-50 text-rose-600 dark:bg-rose-950 dark:text-rose-400">
+                  {formatCurrency(-delta, currency)} over
+                </span>
+              ) : delta === 0 ? (
+                <span className="badge bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">On plan</span>
+              ) : caution ? (
+                <span className="badge bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400">
+                  {formatCurrency(delta, currency)} left
+                </span>
+              ) : (
+                <span className="badge bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
+                  {formatCurrency(delta, currency)} left
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CostByDay({ days, currency }) {
+  const max = Math.max(1, ...days.map((d) => d.dayCost || 0));
+  return (
+    <div className="card p-5">
+      <h3 className="mb-1 text-sm font-extrabold text-slate-900 dark:text-white">Cost by day</h3>
+      <p className="mb-4 text-xs text-slate-400">Estimated cost of each day of the itinerary.</p>
+      <div className="space-y-2.5">
+        {days.map((d) => {
+          const pct = max > 0 ? Math.round(((d.dayCost || 0) / max) * 100) : 0;
+          return (
+            <div key={d.dayNumber} className="flex items-center gap-3 text-xs">
+              <span className="w-16 shrink-0 font-semibold text-slate-500 dark:text-slate-400">Day {d.dayNumber}</span>
+              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${pct}%` }}
+                  transition={{ duration: 0.5 }}
+                  className="h-full rounded-full bg-gradient-to-r from-sky-400 to-brand-600"
+                />
+              </div>
+              <span className="w-24 shrink-0 text-right font-bold text-slate-800 dark:text-slate-100">
+                {formatCurrency(d.dayCost || 0, currency)}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -42,20 +291,35 @@ function AllocationBar({ label, amount, total, color, isEstimate }) {
 
 export default function BudgetOptimizer() {
   const navigate = useNavigate();
-  const [tripId, setTripId] = useState(() => new URLSearchParams(window.location.search).get('trip') || '');
+  const tripId = useTripId();
   const [optimizing, setOptimizing] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState(null);
+  const tripIdRef = useRef(tripId);
+  tripIdRef.current = tripId;
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['itinerary', tripId],
     queryFn: () => tripApi.itinerary(tripId).then((r) => r.data.data),
     enabled: Boolean(tripId),
   });
 
+  const { data: summary } = useQuery({
+    queryKey: ['expense-summary', tripId],
+    queryFn: () => expensesApi.summary({ tripId: tripId || undefined }).then((r) => r.data.data),
+    enabled: Boolean(tripId),
+  });
+
   const allocation = useMemo(() => {
     if (!data) return null;
-    const { trip } = data;
-    // Deterministic re-allocation from the same percentages used by the backend
+    const { trip, itinerary } = data;
+    // Authoritative allocation persisted by the backend, when available.
+    if (itinerary?.budgetAllocation) {
+      const entries = Object.entries(itinerary.budgetAllocation)
+        .filter(([, v]) => v?.pct != null && v?.amount != null)
+        .map(([key, v]) => ({ key, pct: v.pct, amount: v.amount }));
+      if (entries.length) return entries;
+    }
+    // Fallback: deterministic re-allocation from the same percentages used by the backend
     const total = trip.budget.total;
     const split = { transport: 0.28, hotels: 0.3, food: 0.2, activities: 0.1, misc: 0.07, emergencyReserve: 0.05 };
     const styles = {
@@ -71,17 +335,27 @@ export default function BudgetOptimizer() {
     return Object.entries(s).map(([key, pct]) => ({ key, pct, amount: Math.round(total * pct * 100) / 100 }));
   }, [data]);
 
+  // Reset in-memory results whenever the selected trip changes.
+  useEffect(() => {
+    setOptimizeResult(null);
+    setOptimizing(false);
+  }, [tripId]);
+
   const runOptimize = async () => {
     setOptimizing(true);
+    const currentTrip = tripId;
     try {
-      const { data } = await tripApi.optimizeBudget(tripId);
+      const { data } = await tripApi.optimizeBudget(currentTrip);
+      // Trip may have switched while the request was in flight.
+      if (tripIdRef.current !== currentTrip) return;
       setOptimizeResult(data.data.result);
       toast.success(data.data.result.saved > 0 ? `Saved ${formatCurrency(data.data.result.saved, data.data.result.currency)}!` : 'Budget verified within limits');
       refetch();
     } catch (e) {
+      if (tripIdRef.current !== currentTrip) return;
       toast.error(errorMessage(e, 'Optimization failed'));
     } finally {
-      setOptimizing(false);
+      if (tripIdRef.current === currentTrip) setOptimizing(false);
     }
   };
 
@@ -93,10 +367,19 @@ export default function BudgetOptimizer() {
         <PageHeader icon={Wallet} title="Budget Optimizer" subtitle="Allocate, verify and optimize your trip budget." />
         <EmptyState
           icon={Wallet}
-          title="Select a trip to optimize"
-          message="Your trip budget gets allocated across transport, hotels, food, activities and an emergency reserve."
+          title={isError ? 'Could not load this trip' : 'Select a trip to optimize'}
+          message={
+            isError
+              ? 'The selected trip could not be loaded. Pick another trip from the list below.'
+              : 'Your trip budget gets allocated across transport, hotels, food, activities and an emergency reserve.'
+          }
         >
-          <div className="mt-4"><TripSelect value={tripId} onChange={(id) => id && navigate(`/budget?trip=${id}`)} /></div>
+          <div className="mt-4 flex flex-col items-center gap-3">
+            <TripSelect value={tripId || ''} onChange={(id) => id && navigate(`/budget?trip=${id}`)} />
+            <Link to="/planner" className="btn-secondary">
+              <Compass className="h-4 w-4" /> Plan a new trip
+            </Link>
+          </div>
         </EmptyState>
       </div>
     );
@@ -104,22 +387,43 @@ export default function BudgetOptimizer() {
 
   const { trip, itinerary } = data;
   const currency = trip.budget.currency || 'INR';
-  const estimated = trip.totalEstimatedCost;
+  const originalEstimate = trip.totalEstimatedCost;
+  const optimizedCost = trip.totalOptimizedCost ?? originalEstimate;
+  const hasOptimized = optimizedCost < originalEstimate;
+  const estimated = hasOptimized ? optimizedCost : originalEstimate;
   const remaining = trip.budget.total - estimated;
   const over = remaining < 0;
+  const savedSoFar = hasOptimized ? originalEstimate - optimizedCost : 0;
+  const actualSpent = summary?.actualSpending || 0;
+  const remainingPct = trip.budget.total > 0 ? Math.round((Math.max(0, remaining) / trip.budget.total) * 100) : 0;
+  const spentByAlloc = buildSpentByAlloc(summary);
 
   return (
     <div>
       <PageHeader
         icon={Wallet}
         title="Budget Optimizer"
-        subtitle={`${trip.title} · ${trip.destination}`}
+        subtitle={`${trip.title} · ${trip.destination} · ${daysBetween(trip.startDate, trip.endDate)} days`}
         actions={
-          <TripSelect value={trip._id} onChange={(id) => id && navigate(`/budget?trip=${id}`)} />
+          <>
+            <a href={tripApi.budgetPdfUrl(trip._id)} target="_blank" rel="noreferrer" className="btn-secondary">
+              <Download className="h-4 w-4" /> Download budget PDF
+            </a>
+            <TripSelect value={trip._id} onChange={(id) => id && navigate(`/budget?trip=${id}`)} />
+          </>
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      {/* Overview */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard icon={Wallet} label="Total budget" value={formatCurrency(trip.budget.total, currency)} tone="blue" sub={`${trip.preferences?.travelStyle || 'standard'} style`} />
+        <StatCard icon={Target} label="Original estimate" value={formatCurrency(originalEstimate, currency)} tone="violet" sub="Before optimization" />
+        <StatCard icon={PiggyBank} label="Optimized cost" value={formatCurrency(optimizedCost, currency)} tone="green" sub={savedSoFar > 0 ? `Saved ${formatCurrency(savedSoFar, currency)}` : 'Already minimal'} />
+        <StatCard icon={TrendingDown} label={over ? 'Over budget' : 'Remaining'} value={over ? formatCurrency(-remaining, currency) : formatCurrency(remaining, currency)} tone={over ? 'rose' : 'amber'} sub={over ? `Over by ${formatCurrency(-remaining, currency)}` : `${remainingPct}% of budget left`} />
+        <StatCard icon={Receipt} label="Actual spent" value={formatCurrency(actualSpent, currency)} tone={actualSpent > trip.budget.total ? 'rose' : 'blue'} sub={actualSpent > 0 ? `of ${formatCurrency(trip.budget.total, currency)} planned` : 'No expenses yet'} />
+      </div>
+
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
         {/* Allocation */}
         <div className="card p-6">
           <h3 className="mb-4 text-base font-extrabold text-slate-900 dark:text-white">Smart allocation</h3>
@@ -129,6 +433,7 @@ export default function BudgetOptimizer() {
                 key={a.key}
                 label={CATEGORY_LABELS[a.key] || a.key}
                 amount={a.amount}
+                spent={spentByAlloc[a.key] || 0}
                 total={trip.budget.total}
                 isEstimate
                 color={a.key === 'emergencyReserve' ? 'from-rose-400 to-rose-600' : 'from-brand-400 to-brand-600'}
@@ -143,108 +448,38 @@ export default function BudgetOptimizer() {
               </span>
             </div>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Total budget {formatCurrency(trip.budget.total, currency)} · Estimated {formatCurrency(estimated, currency)} (estimates flagged)
+              Total budget {formatCurrency(trip.budget.total, currency)} ·{' '}
+              {hasOptimized ? (
+                <>Optimized {formatCurrency(estimated, currency)} (original {formatCurrency(originalEstimate, currency)})</>
+              ) : (
+                <>Estimated {formatCurrency(estimated, currency)} (estimates flagged)</>
+              )}
             </p>
           </div>
-          <button onClick={runOptimize} disabled={optimizing} className="btn-primary mt-4 w-full">
-            {optimizing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Wand2 className="h-4 w-4" />}
-            {optimizing ? 'Optimizing…' : 'Run Budget Agent optimization'}
-          </button>
+          {itinerary?.days?.length > 0 && (
+            <div className="mt-4">
+              <CostByDay days={itinerary.days} currency={currency} />
+            </div>
+          )}
         </div>
 
         {/* Optimization results */}
         <div className="space-y-4">
-          {optimizeResult ? (
-            <>
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card p-6">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-500 dark:bg-emerald-950">
-                    <PiggyBank className="h-6 w-6" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-bold text-slate-900 dark:text-white">Optimization complete</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Original {formatCurrency(optimizeResult.original, currency)} → Optimized {formatCurrency(optimizeResult.optimized, currency)}</p>
-                  </div>
-                </div>
-                <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
-                    <p className="text-[11px] font-semibold uppercase text-slate-400">Money saved</p>
-                    <p className="text-lg font-extrabold text-emerald-500">{formatCurrency(optimizeResult.saved, currency)}</p>
-                  </div>
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
-                    <p className="text-[11px] font-semibold uppercase text-slate-400">Remaining</p>
-                    <p className="text-lg font-extrabold text-slate-900 dark:text-white">{formatCurrency(optimizeResult.remaining, currency)}</p>
-                  </div>
-                  <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
-                    <p className="text-[11px] font-semibold uppercase text-slate-400">Status</p>
-                    <p className={`text-lg font-extrabold ${optimizeResult.withinBudget ? 'text-emerald-500' : 'text-rose-500'}`}>
-                      {optimizeResult.withinBudget ? 'In budget' : 'Over'}
-                    </p>
-                  </div>
-                </div>
-              </motion.div>
-
-              {optimizeResult.dropped?.length > 0 && (
-                <div className="card p-5">
-                  <p className="mb-2 flex items-center gap-2 text-sm font-extrabold text-slate-900 dark:text-white">
-                    <TrendingDown className="h-4 w-4 text-rose-500" /> Removed to fit budget
-                  </p>
-                  <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-300">
-                    {optimizeResult.dropped.map((d, i) => (
-                      <li key={i} className="flex justify-between rounded-lg bg-rose-50 px-3 py-1.5 dark:bg-rose-950/40">
-                        <span>{d.category} item</span>
-                        <span className="font-bold">−{formatCurrency(d.amount, currency)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {optimizeResult.reductions?.length > 0 && (
-                <div className="card p-5">
-                  <p className="mb-2 flex items-center gap-2 text-sm font-extrabold text-slate-900 dark:text-white">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-500" /> Reduced costs
-                  </p>
-                  <ul className="space-y-1.5 text-sm text-slate-600 dark:text-slate-300">
-                    {optimizeResult.reductions.slice(0, 6).map((r, i) => (
-                      <li key={i} className="rounded-lg bg-emerald-50 px-3 py-1.5 dark:bg-emerald-950/40">
-                        <span className="font-semibold">{r.category}:</span> {formatCurrency(r.from, currency)} → {formatCurrency(r.to, currency)}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {!optimizeResult.withinBudget && (
-                <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm dark:border-amber-900 dark:bg-amber-950/40">
-                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-500" />
-                  <p className="text-amber-800 dark:text-amber-300">
-                    Even after optimization this trip exceeds the budget. Try cheaper dates, a nearer destination,
-                    or ask the chatbot to “make my trip cheaper”.
-                  </p>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="card flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-              <PiggyBank className="h-12 w-12 text-slate-300 dark:text-slate-600" />
-              <p className="max-w-xs text-sm text-slate-500 dark:text-slate-400">
-                Run the optimizer to see the original vs optimized cost, money saved and remaining budget.
-              </p>
-            </div>
-          )}
-
-          <LinkToItinerary tripId={trip._id} />
+          <OptimizationPanel
+            result={optimizeResult || itinerary?.optimizedBudget || null}
+            currency={currency}
+            optimizing={optimizing}
+            onRun={runOptimize}
+          />
+          <Link to={`/itinerary/${trip._id}`} className="btn-secondary w-full">
+            <CalendarRange className="h-4 w-4" /> View updated itinerary
+          </Link>
         </div>
       </div>
-    </div>
-  );
-}
 
-function LinkToItinerary({ tripId }) {
-  return (
-    <Link to={`/itinerary/${tripId}`} className="btn-secondary w-full">
-      View updated itinerary
-    </Link>
+      <div className="mt-6">
+        <SpendingVsPlan allocation={allocation} summary={summary} currency={currency} tripId={trip._id} />
+      </div>
+    </div>
   );
 }

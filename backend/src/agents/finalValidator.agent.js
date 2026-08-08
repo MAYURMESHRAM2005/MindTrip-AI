@@ -35,6 +35,55 @@ class FinalValidatorAgent extends BaseAgent {
       issues.push(`Estimated cost (${totalEstimatedCost}) exceeds budget (${budget})`);
     }
 
+    // 1b. Duplicate places / restaurants / costs across days
+    const seenAttractions = new Map();
+    const seenRestaurants = new Map();
+    const attractionCosts = new Map(); // amount -> Set of attraction titles
+    const duplicatePlaces = [];
+    const duplicateRestaurants = [];
+    let duplicateCosts = 0;
+    for (const day of days || []) {
+      for (const act of day.activities || []) {
+        const title = String(act.title || '').trim();
+        const name = String(act.place || '').trim();
+        if (!name) continue;
+        if (act.category === 'attraction' || act.category === 'activity') {
+          if (seenAttractions.has(name)) {
+            duplicatePlaces.push(`${name} (Day ${seenAttractions.get(name)} & Day ${day.dayNumber})`);
+          } else {
+            seenAttractions.set(name, day.dayNumber);
+          }
+        }
+        if (act.category === 'restaurant') {
+          if (seenRestaurants.has(name)) {
+            duplicateRestaurants.push(`${name} (Day ${seenRestaurants.get(name)} & Day ${day.dayNumber})`);
+          } else {
+            seenRestaurants.set(name, day.dayNumber);
+          }
+        }
+        // Duplicate-cost check is scoped to attractions/activities only, so
+        // shared meal price levels never produce false positives.
+        const amt = act.cost?.amount;
+        if ((act.category === 'attraction' || act.category === 'activity') && typeof amt === 'number' && amt > 0) {
+          if (!attractionCosts.has(amt)) attractionCosts.set(amt, new Set());
+          attractionCosts.get(amt).add(title);
+        }
+      }
+    }
+    for (const titles of attractionCosts.values()) {
+      if (titles.size > 1) duplicateCosts += 1;
+    }
+    if (duplicatePlaces.length) {
+      warnings.push(`Duplicate attractions/activities across days: ${duplicatePlaces.slice(0, 4).join(', ')}`);
+    }
+    if (duplicateRestaurants.length) {
+      warnings.push(`Duplicate restaurants across days: ${duplicateRestaurants.slice(0, 4).join(', ')}`);
+    }
+    if (duplicateCosts > 0) {
+      warnings.push(`${duplicateCosts} activity cost(s) identical across different items - verify estimates`);
+    }
+    const duplicatesFound = duplicatePlaces.length > 0 || duplicateRestaurants.length > 0 || duplicateCosts > 0;
+
     // 2. Dates consistency
     for (const day of days || []) {
       const d = new Date(day.date);
@@ -45,18 +94,31 @@ class FinalValidatorAgent extends BaseAgent {
       }
     }
 
-    // 3. Overlaps
+    // 3. Overlaps - duration-aware. Two activities only conflict when their
+    //    estimated time windows actually intersect (10-min buffer). Hotel
+    //    check-in / checkout / overnight entries are administrative markers
+    //    and are not scheduled blocks, so they never trigger overlaps.
+    const DURATION_MIN = {
+      transport: 30, flight: 30, train: 30, bus: 30,
+      restaurant: 60, attraction: 120, activity: 90,
+      free: 60, other: 45,
+      hotel: 0, weather: 0, safety: 0,
+    };
+    const OVERLAP_BUFFER = 10;
     for (const day of days || []) {
-      const times = [];
+      const blocks = [];
       for (const act of day.activities || []) {
-        const m = this._timeToMinutes(act.time);
-        if (m === null) continue;
-        for (const [t, other] of times) {
-          if (Math.abs(m - t) < 60) {
-            issues.push(`Day ${day.dayNumber}: "${act.title}" at ${act.time} overlaps "${other.title}"`);
+        const start = this._timeToMinutes(act.time);
+        if (start === null) continue;
+        const duration = DURATION_MIN[act.category] ?? 45;
+        if (duration <= 0) continue; // marker entry - not a scheduled block
+        const end = start + duration;
+        for (const b of blocks) {
+          if (start < b.end - OVERLAP_BUFFER && b.start < end - OVERLAP_BUFFER) {
+            issues.push(`Day ${day.dayNumber}: "${act.title}" at ${act.time} overlaps "${b.title}"`);
           }
         }
-        times.push([m, act]);
+        blocks.push({ start, end, title: act.title });
       }
     }
 
@@ -95,6 +157,10 @@ class FinalValidatorAgent extends BaseAgent {
         ? `Validation failed with ${issues.length} issue(s)`
         : `Validation passed with ${warnings.length} warning(s)`,
       fixesApplied: [],
+      duplicatePlaces,
+      duplicateRestaurants,
+      duplicateCosts,
+      duplicatesFound,
     };
   }
 

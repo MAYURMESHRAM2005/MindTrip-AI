@@ -25,6 +25,11 @@ const CATEGORY_MAP = {
   transit_station: 'public_transport',
   embassy: 'office.diplomatic',
   cafe: 'catering.cafe',
+  bar: 'catering.bar',
+  nightlife: 'entertainment.nightclub,catering.bar',
+  viewpoint: 'tourism.viewpoint',
+  beach: 'natural.beach',
+  market: 'commercial.marketplace',
   shopping: 'commercial.shopping_mall',
 };
 
@@ -41,6 +46,13 @@ function mapResult(f) {
     userRatingsTotal: null,
     priceLevel: null,
     types: p.categories || [],
+    // Locality fields drive day-by-day geographic area planning (real names,
+    // never invented). Falls back gracefully when the provider omits them.
+    suburb: p.suburb || '',
+    district: p.district || '',
+    county: p.county || '',
+    city: p.city || '',
+    state: p.state || '',
     openNow: null,
     photoRef: '',
     distanceMeters: p.distance ?? null,

@@ -54,6 +54,62 @@ export function allocationForStyle(style, total) {
 }
 
 /**
+ * Number of hotel rooms a party needs. 2 adults per room; children share
+ * their parents' rooms; solo groups always get at least 1 room.
+ * Deterministic so hotel math is consistent everywhere.
+ */
+export function roomsForParty({ adults = 1, children = 0 } = {}) {
+  const a = Math.max(0, Number(adults) || 0);
+  const c = Math.max(0, Number(children) || 0);
+  if (a <= 0 && c <= 0) return 1;
+  const adultRooms = Math.ceil(a / 2);
+  // Children occupy a room only when there are no adults to share with.
+  const childRooms = a === 0 ? Math.ceil(c / 2) : 0;
+  return Math.max(1, adultRooms + childRooms);
+}
+
+/**
+ * Budget utilization report — the headline numbers shown on the itinerary.
+ * { total, spent, remaining, usedPct, withinBudget }
+ */
+export function budgetUtilization({ total, spent }) {
+  const totalN = Math.max(0, Number(total) || 0);
+  const spentN = Math.max(0, Number(spent) || 0);
+  const remaining = Math.round((totalN - spentN) * 100) / 100;
+  const usedPct = totalN > 0 ? Math.min(100, Math.round((spentN / totalN) * 1000) / 10) : 0;
+  return { total: totalN, spent: spentN, remaining, usedPct, withinBudget: spentN <= totalN };
+}
+
+/**
+ * Spread each category's allocation across the trip as a daily envelope.
+ * Hotels are spread across nights (not days), food across days, and the
+ * transport budget across the trip (intercity legs use half each).
+ * Returns { perDay, totals } where perDay is the daily envelope map.
+ */
+export function planDailyBudgets({ allocation, daysCount = 1, nights = 0, rooms = 1 }) {
+  const alloc = allocation || {};
+  const safeDays = Math.max(1, Number(daysCount) || 1);
+  const safeNights = Math.max(0, Number(nights) || 0);
+  const safeRooms = Math.max(1, Number(rooms) || 1);
+  const amt = (k) => Math.round((alloc[k]?.amount || 0) * 100) / 100;
+  const perDay = {
+    food: Math.round((amt('food') / safeDays) * 100) / 100,
+    activities: Math.round((amt('activities') / safeDays) * 100) / 100,
+    misc: Math.round((amt('misc') / safeDays) * 100) / 100,
+    transport: Math.round((amt('transport') / Math.max(1, safeDays)) * 100) / 100,
+    hotelPerRoomNight: safeNights > 0 ? Math.round((amt('hotels') / safeNights / safeRooms) * 100) / 100 : 0,
+  };
+  const totals = {
+    food: perDay.food * safeDays,
+    activities: perDay.activities * safeDays,
+    misc: perDay.misc * safeDays,
+    transport: amt('transport'),
+    hotels: amt('hotels'),
+  };
+  return { perDay, totals };
+}
+
+/**
  * Sum a list of cost items.
  */
 export function sumCosts(items) {
@@ -141,6 +197,9 @@ export default {
   DEFAULT_ALLOCATION,
   allocateBudget,
   allocationForStyle,
+  roomsForParty,
+  budgetUtilization,
+  planDailyBudgets,
   sumCosts,
   optimizeCosts,
   buildBudgetReport,

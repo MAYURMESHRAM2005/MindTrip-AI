@@ -1,12 +1,12 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as Icons from 'lucide-react';
 import { SIDEBAR_NAV, APP_NAME } from '../../constants';
 import { useAuthStore } from '../../store/authStore';
 import { useI18n } from '../../utils/i18n';
 import { initials } from '../../utils/format';
-import { X } from 'lucide-react';
+import { X, LogOut } from 'lucide-react';
 
 function Icon({ name, className }) {
   const Cmp = Icons[name] || Icons.Circle;
@@ -15,9 +15,18 @@ function Icon({ name, className }) {
 
 export default function Sidebar({ open, onClose }) {
   const user = useAuthStore((s) => s.user);
+  const logout = useAuthStore((s) => s.logout);
   const { t } = useI18n();
+  const navigate = useNavigate();
 
   const isAdmin = user?.role === 'admin';
+
+  const handleLogout = () => {
+    // Fire-and-forget: the store clears state immediately regardless of the
+    // API result, so we don't block redirect on a slow/offline network.
+    logout();
+    navigate('/login', { replace: true });
+  };
 
   return (
     <AnimatePresence>
@@ -100,6 +109,15 @@ export default function Sidebar({ open, onClose }) {
                   <p className="truncate text-xs text-slate-500 dark:text-slate-400">{user?.email}</p>
                 </div>
               </div>
+              <button
+                onClick={handleLogout}
+                title={t('logout')}
+                aria-label={t('logout')}
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-500 transition-all hover:bg-rose-50 hover:text-rose-600 dark:text-slate-400 dark:hover:bg-rose-950/60 dark:hover:text-rose-400"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                {t('logout')}
+              </button>
             </div>
           </aside>
         </>

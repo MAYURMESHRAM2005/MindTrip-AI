@@ -3,11 +3,12 @@ import { useQuery } from '@tanstack/react-query';
 import { Bus, Search, Clock } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Input } from '../components/ui/Input';
+import PlaceAutocomplete from '../components/PlaceAutocomplete';
 import Button from '../components/ui/Button';
 import ProviderNotice from '../components/ProviderNotice';
 import { busesApi } from '../services/apiClient';
 import { Spinner } from '../components/ui/Spinner';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, todayISO } from '../utils/format';
 
 export default function Buses() {
   const [params, setParams] = useState({ from: '', to: '', date: '', passengers: 1 });
@@ -25,9 +26,9 @@ export default function Buses() {
 
       <div className="card mb-6 p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Input label="From" placeholder="Pune" value={params.from} onChange={(e) => setParams({ ...params, from: e.target.value })} />
-          <Input label="To" placeholder="Goa" value={params.to} onChange={(e) => setParams({ ...params, to: e.target.value })} />
-          <Input label="Date" type="date" value={params.date} onChange={(e) => setParams({ ...params, date: e.target.value })} />
+          <PlaceAutocomplete label="From" placeholder="Pune" value={params.from} onChange={(v) => setParams({ ...params, from: v })} />
+          <PlaceAutocomplete label="To" placeholder="Goa" value={params.to} onChange={(v) => setParams({ ...params, to: v })} />
+          <Input label="Date" type="date" min={todayISO()} value={params.date} onChange={(e) => setParams({ ...params, date: e.target.value })} />
           <Input label="Passengers" type="number" min={1} value={params.passengers} onChange={(e) => setParams({ ...params, passengers: Number(e.target.value) || 1 })} />
         </div>
         <Button className="mt-4" icon={Search} disabled={!params.from || !params.to || !params.date} onClick={() => setSearch({ ...params })}>

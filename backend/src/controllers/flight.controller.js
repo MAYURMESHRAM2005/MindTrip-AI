@@ -5,8 +5,8 @@ import flightProvider from '../providers/flight.provider.js';
 export const searchFlights = asyncHandler(async (req, res) => {
   const { origin, destination, departDate, returnDate, adults, travelClass, nonStop, maxPrice } = req.query;
   const result = await flightProvider.searchFlights({
-    origin: origin.toUpperCase(),
-    destination: destination.toUpperCase(),
+    origin: (origin || '').trim(),
+    destination: (destination || '').trim(),
     departDate,
     returnDate: returnDate || null,
     adults: Number(adults) || 1,
@@ -14,7 +14,14 @@ export const searchFlights = asyncHandler(async (req, res) => {
     nonStop: nonStop === 'true',
     maxPrice: maxPrice ? Number(maxPrice) : null,
   });
-  res.json(ApiResponse.ok(result.message, { flights: result.data || [], isLive: result.isLive, provider: result.source }));
+  res.json(
+    ApiResponse.ok(result.message, {
+      flights: result.data || [],
+      isLive: result.isLive,
+      provider: result.source,
+      providerStatus: flightProvider.providerStatus(),
+    })
+  );
 });
 
 export default { searchFlights };

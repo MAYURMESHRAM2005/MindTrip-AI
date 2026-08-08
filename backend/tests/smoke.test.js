@@ -63,8 +63,11 @@ test('all feature routes are wired and respond', { skip: skipReason }, async () 
       ['GET', '/api/trains/search?from=Mumbai&to=Goa&date=2026-02-01', 200],
       ['GET', '/api/buses/search?from=Pune&to=Goa&date=2026-02-01', 200],
       ['GET', '/api/restaurants/search?q=Goa%20restaurants', 200],
+      ['GET', '/api/restaurants/search?city=Goa', 200],
+      ['GET', '/api/restaurants/search?lat=15.49&lng=73.81', 200],
       ['GET', '/api/places/search?q=Goa', 200],
       ['GET', '/api/maps/geocode?address=Goa', 200],
+      ['GET', '/api/maps/autocomplete?q=Nag', 200],
       ['GET', '/api/geocode?address=Goa', 200],
       ['GET', '/api/routes?origin=Mumbai&destination=Goa&mode=driving', 200],
       ['GET', '/api/weather/forecast?city=Goa', 200],
@@ -91,10 +94,13 @@ test('all feature routes are wired and respond', { skip: skipReason }, async () 
       }
     }
 
-    // PDF download
+    // PDF downloads
     const pdf = await agent.get(`/api/trips/${tripId}/pdf`);
     assert.equal(pdf.status, 200);
     assert.ok(pdf.headers['content-type']?.includes('application/pdf'), 'should stream a PDF');
+    const budgetPdf = await agent.get(`/api/trips/${tripId}/budget-pdf`);
+    assert.equal(budgetPdf.status, 200);
+    assert.ok(budgetPdf.headers['content-type']?.includes('application/pdf'), 'should stream a budget PDF');
   } finally {
     await mongoose.connection.dropDatabase();
     await mongoose.disconnect();

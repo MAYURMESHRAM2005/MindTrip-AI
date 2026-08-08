@@ -1,18 +1,44 @@
 import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { UtensilsCrossed, Search, Star, MapPin } from 'lucide-react';
+import { UtensilsCrossed, Search, Star, MapPin, Navigation, LocateFixed } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Input } from '../components/ui/Input';
+import PlaceAutocomplete from '../components/PlaceAutocomplete';
 import Button from '../components/ui/Button';
 import ProviderNotice from '../components/ProviderNotice';
 import { restaurantsApi } from '../services/apiClient';
 import { Spinner } from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
 import { cn } from '../utils/format';
+import { haversineKm } from '../utils/geo';
+import toast from 'react-hot-toast';
+
+/** Distance from the search city center (Geoapify reports it from the bias point). */
+function distanceFromCenterKm(restaurant, center) {
+  if (!center || !restaurant?.coordinates) return null;
+  if (restaurant.distanceMeters != null) return restaurant.distanceMeters / 1000;
+  return haversineKm(center.lat, center.lng, restaurant.coordinates.lat, restaurant.coordinates.lng);
+}
+
+function formatDistanceKm(km) {
+  if (km == null) return null;
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return `${km < 10 ? km.toFixed(1) : Math.round(km)} km`;
+}
+
+function restaurantsFromQuery() {
+  return { city: new URLSearchParams(window.location.search).get('city') || '', q: '', veg: false, vegan: false, nonVeg: false, minRating: '' };
+}
 
 export default function Restaurants() {
-  const [params, setParams] = useState({ q: '', veg: false, vegan: false, nonVeg: false, minRating: '' });
-  const [search, setSearch] = useState(null);
+  const [params, setParams] = useState(restaurantsFromQuery);
+  // Topbar search (?city=Goa) auto-runs the search on mount.
+  const [search, setSearch] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('city') ? restaurantsFromQuery() : null;
+  });
+  const [nearby, setNearby] = useState(false);
+  const [locating, setLocating] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['restaurants', search],
@@ -22,18 +48,59 @@ export default function Restaurants() {
 
   const toggle = (key) => setParams({ ...params, veg: false, vegan: false, nonVeg: false, [key]: !params[key] });
 
+  // A regular city/keyword search replaces any nearby-location results.
+  const runSearch = (payload) => {
+    setNearby(false);
+    setSearch(payload);
+  };
+
+  /** Search restaurants around the user's current location (browser geolocation). */
+  const locateNearby = () => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported by this browser');
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocating(false);
+        setNearby(true);
+        setSearch({ ...params, city: '', lat: pos.coords.latitude, lng: pos.coords.longitude });
+      },
+      (err) => {
+        setLocating(false);
+        toast.error(
+          err.code === 1
+            ? 'Location permission denied — allow access or search by city instead'
+            : 'Could not get your location'
+        );
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+    );
+  };
+
   return (
     <div>
       <PageHeader icon={UtensilsCrossed} title="Restaurants" subtitle="Real Geoapify Places data with food-preference filters." />
 
       <div className="card mb-6 p-5">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-[220px] flex-1">
+          <div className="min-w-[180px] flex-1">
+            <PlaceAutocomplete
+              label="City / place"
+              placeholder="Goa, Pondicherry…"
+              value={params.city}
+              onKeyDown={(e) => e.key === 'Enter' && (params.city || params.q) && runSearch({ ...params })}
+              onChange={(city) => setParams({ ...params, city })}
+              onSelect={(s) => runSearch({ ...params, city: s.name || s.formatted || '' })}
+            />
+          </div>
+          <div className="min-w-[180px] flex-1">
             <Input
-              label="Search restaurants"
-              placeholder="Best restaurants in Goa…"
+              label="Search within (optional)"
+              placeholder="seafood, rooftop, cafes…"
               value={params.q}
-              onKeyDown={(e) => e.key === 'Enter' && setSearch({ ...params })}
+              onKeyDown={(e) => e.key === 'Enter' && (params.city || params.q) && runSearch({ ...params })}
               onChange={(e) => setParams({ ...params, q: e.target.value })}
             />
           </div>
@@ -57,7 +124,12 @@ export default function Restaurants() {
               <option value="4.5">4.5+</option>
             </select>
           </div>
-          <Button icon={Search} onClick={() => setSearch({ ...params })}>Search</Button>
+          <div className="flex flex-wrap items-center gap-2 pb-1">
+            <Button icon={Search} disabled={!params.city && !params.q} onClick={() => runSearch({ ...params })}>Search restaurants</Button>
+            <Button variant="outline" icon={LocateFixed} loading={locating} disabled={locating} onClick={locateNearby}>
+              {locating ? 'Locating…' : 'Near me'}
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -71,18 +143,32 @@ export default function Restaurants() {
         <>
           <p className="mb-3 text-xs font-semibold text-emerald-600">
             ● Live from Geoapify Places
+            {nearby ? (
+              <span className="text-slate-500"> · near your location</span>
+            ) : data.searchedCity ? (
+              <span className="text-slate-500"> · near {data.searchedCity}</span>
+            ) : null}
             {data.filterApplied && (
               <span className="text-slate-400"> · diet filter requested (Places may not expose diet labels — check each listing)</span>
             )}
           </p>
+          {nearby && (
+            <div className="mb-3 flex items-center gap-2">
+              <LocateFixed className="h-4 w-4 text-emerald-600" />
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Nearby restaurants</h3>
+              <span className="text-xs text-slate-400">within 5 km of your location</span>
+            </div>
+          )}
           {data.restaurants.length === 0 ? (
             <div className="card p-8 text-center text-sm text-slate-500">
               No matching restaurants. Try clearing the diet filter — diet details aren't always exposed by Places.
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {data.restaurants.map((r, i) => (
-                <div key={r.placeId || i} className="card flex flex-col p-5 transition-all hover:-translate-y-0.5 hover:shadow-card">
+              {data.restaurants.map((r, i) => {
+                const distKm = distanceFromCenterKm(r, data.coordinates);
+                return (
+                  <div key={r.placeId || i} className="card flex flex-col p-5 transition-all hover:-translate-y-0.5 hover:shadow-card">
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="font-extrabold text-slate-900 dark:text-white">{r.name}</h3>
                     {r.openNow != null && (
@@ -103,18 +189,24 @@ export default function Restaurants() {
                       <MapPin className="mt-0.5 h-3 w-3 shrink-0" /> {r.address}
                     </p>
                   )}
-                  <div className="mt-auto pt-3">
-                    <a
-                      href={r.coordinates?.lat != null ? `https://www.openstreetmap.org/?mlat=${r.coordinates.lat}&mlon=${r.coordinates.lng}#map=17/${r.coordinates.lat}/${r.coordinates.lng}` : `https://www.openstreetmap.org/search?query=${encodeURIComponent(r.name)}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="btn-secondary w-full py-1.5 text-xs"
-                    >
-                      View on map
-                    </a>
+                  {distKm != null && (
+                    <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                      <Navigation className="h-3 w-3 shrink-0" /> {formatDistanceKm(distKm)} {nearby ? 'from your location' : 'from city center'}
+                    </p>
+                  )}
+                    <div className="mt-auto pt-3">
+                      <a
+                        href={r.coordinates?.lat != null ? `https://www.openstreetmap.org/?mlat=${r.coordinates.lat}&mlon=${r.coordinates.lng}#map=17/${r.coordinates.lat}/${r.coordinates.lng}` : `https://www.openstreetmap.org/search?query=${encodeURIComponent(r.name)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-secondary w-full py-1.5 text-xs"
+                      >
+                        View on map
+                      </a>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </>

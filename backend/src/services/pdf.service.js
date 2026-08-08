@@ -1,5 +1,17 @@
 import PDFDocument from 'pdfkit';
 
+const BUDGET_CATEGORY_LABELS = {
+  transport: 'Transportation', flights: 'Flights', train: 'Train', bus: 'Bus',
+  hotels: 'Hotels', food: 'Food', localTransport: 'Local transport', activities: 'Activities',
+  tickets: 'Tickets', shopping: 'Shopping', misc: 'Miscellaneous', emergencyReserve: 'Emergency reserve',
+};
+
+// Recorded expense categories -> allocation buckets (mirrors the frontend).
+const EXPENSE_TO_ALLOC = {
+  food: 'food', hotel: 'hotels', transport: 'transport', tickets: 'activities',
+  activities: 'activities', shopping: 'misc', other: 'misc',
+};
+
 /**
  * Generate a professional PDF itinerary with pdfkit.
  */
@@ -106,4 +118,150 @@ export function buildItineraryPdf({ trip, itinerary }) {
   });
 }
 
-export default { buildItineraryPdf };
+/**
+ * Generate a budget report PDF: overview figures, allocation vs spending,
+ * and the stored optimization summary.
+ */
+export function buildBudgetPdf({ trip, itinerary, allocation, expenses = [] }) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: 'A4', margins: { top: 48, bottom: 48, left: 48, right: 48 } });
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    const currency = trip.budget.currency || 'INR';
+    const accent = '#0ea5e9';
+    const fmt = (n) => `${currency} ${Number(n || 0).toLocaleString()}`;
+
+    // Header
+    doc.rect(0, 0, doc.page.width, 96).fill(accent);
+    doc.fillColor('#ffffff').fontSize(22).font('Helvetica-Bold').text('TravelMind AI', 48, 28);
+    doc.fontSize(11).font('Helvetica').text('Budget Report', 48, 56);
+
+    doc.fillColor('#0f172a').fontSize(18).font('Helvetica-Bold').text(trip.title, 48, 120);
+    doc.fontSize(10).font('Helvetica').fillColor('#475569');
+    doc.text(
+      `${trip.origin ? trip.origin + ' → ' : ''}${trip.destination}  •  ${new Date(trip.startDate).toDateString()} – ${new Date(trip.endDate).toDateString()}`,
+      48, 144
+    );
+    doc.text(
+      `Travelers: ${trip.travelers?.adults || 1} adult(s)${trip.travelers?.children ? `, ${trip.travelers.children} child(ren)` : ''}  •  Travel style: ${trip.preferences?.travelStyle || 'standard'}`,
+      48, 160
+    );
+
+    let y = 195;
+    const ensure = (needed) => {
+      if (y + needed > doc.page.height - 60) {
+        doc.addPage();
+        y = 48;
+      }
+    };
+
+    // 1. Budget overview
+    const original = Number(trip.totalEstimatedCost) || 0;
+    const optimized = Number(trip.totalOptimizedCost ?? original) || original;
+    const saved = Math.max(0, original - optimized);
+    const remaining = trip.budget.total - optimized;
+    const totalSpent = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
+    doc.fillColor('#0f172a').fontSize(13).font('Helvetica-Bold').text('Budget Overview', 48, y);
+    y += 18;
+    const figures = [
+      ['Total budget', fmt(trip.budget.total), '#0f172a'],
+      ['Original estimated cost', fmt(original), '#0f172a'],
+      ['Optimized cost', fmt(optimized), '#0f172a'],
+      ['Money saved', fmt(saved), '#059669'],
+      [remaining < 0 ? 'Over budget by' : 'Remaining budget', fmt(Math.abs(remaining)), remaining < 0 ? '#e11d48' : '#0f172a'],
+      ['Actual spent (expenses)', fmt(totalSpent), totalSpent > trip.budget.total ? '#e11d48' : '#0f172a'],
+    ];
+    for (const [k, v, color] of figures) {
+      ensure(18);
+      doc.font('Helvetica').fontSize(9.5).fillColor('#475569').text(k, 60, y);
+      doc.font('Helvetica-Bold').fillColor(color).text(v, 400, y);
+      y += 16;
+    }
+
+    // 2. Allocation vs spending
+    y += 6;
+    doc.moveTo(48, y).lineTo(552, y).strokeColor('#e2e8f0').stroke();
+    y += 16;
+    doc.fillColor('#0f172a').fontSize(12).font('Helvetica-Bold').text('Allocation vs Spending', 48, y);
+    y += 18;
+
+    const spentByAlloc = {};
+    for (const e of expenses) {
+      const bucket = EXPENSE_TO_ALLOC[e.category] || 'misc';
+      spentByAlloc[bucket] = (spentByAlloc[bucket] || 0) + (Number(e.amount) || 0);
+    }
+
+    doc.font('Helvetica-Bold').fontSize(9).fillColor('#0f172a');
+    doc.text('Category', 60, y);
+    doc.text('%', 320, y);
+    doc.text('Allocated', 375, y);
+    doc.text('Spent', 465, y);
+    y += 14;
+    const allocEntries = Object.entries(allocation || {}).filter(([, v]) => v?.amount != null);
+    for (const [key, v] of allocEntries) {
+      ensure(16);
+      doc.font('Helvetica').fontSize(9).fillColor('#475569').text(BUDGET_CATEGORY_LABELS[key] || key, 60, y);
+      doc.text(`${v.pct}%`, 320, y);
+      doc.text(fmt(v.amount), 375, y);
+      doc.text(fmt(spentByAlloc[key] || 0), 465, y);
+      y += 14;
+    }
+    if (!allocEntries.length) {
+      doc.font('Helvetica-Oblique').fontSize(9).fillColor('#94a3b8').text('No allocation data available.', 60, y);
+      y += 14;
+    }
+
+    // 3. Optimization summary
+    const opt = itinerary.optimizedBudget;
+    if (opt) {
+      y += 6;
+      ensure(60);
+      doc.moveTo(48, y).lineTo(552, y).strokeColor('#e2e8f0').stroke();
+      y += 16;
+      doc.fillColor('#0f172a').fontSize(12).font('Helvetica-Bold').text('Optimization Summary', 48, y);
+      y += 18;
+      doc.font('Helvetica').fontSize(9.5).fillColor('#475569').text(
+        `Original ${fmt(opt.original)} → Optimized ${fmt(opt.optimized)}  •  Saved ${fmt(opt.saved)}  •  ${opt.withinBudget ? 'Within budget' : 'Still over budget'}`,
+        60, y, { width: 460 }
+      );
+      y += 16;
+      if (opt.notes) {
+        doc.font('Helvetica-Oblique').fontSize(8.5).fillColor('#64748b').text(opt.notes, 60, y, { width: 460 });
+        y += 14;
+      }
+      if ((opt.dropped || []).length) {
+        ensure(20 + opt.dropped.length * 14);
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#e11d48').text('Removed to fit budget', 60, y);
+        y += 14;
+        for (const d of opt.dropped) {
+          doc.font('Helvetica').fontSize(9).fillColor('#475569').text(`- ${BUDGET_CATEGORY_LABELS[d.category] || d.category} item`, 72, y);
+          doc.font('Helvetica-Bold').fillColor('#e11d48').text(`- ${fmt(d.amount)}`, 400, y);
+          y += 14;
+        }
+      }
+      if ((opt.reductions || []).length) {
+        ensure(20 + opt.reductions.length * 14);
+        doc.font('Helvetica-Bold').fontSize(9.5).fillColor('#059669').text('Reduced costs', 60, y);
+        y += 14;
+        for (const r of opt.reductions) {
+          doc.font('Helvetica').fontSize(9).fillColor('#475569').text(BUDGET_CATEGORY_LABELS[r.category] || r.category, 72, y);
+          doc.font('Helvetica-Bold').fillColor('#059669').text(`${fmt(r.from)} → ${fmt(r.to)}`, 360, y);
+          y += 14;
+        }
+      }
+    }
+
+    doc.font('Helvetica').fontSize(8).fillColor('#94a3b8').text(
+      `Generated by TravelMind AI on ${new Date().toDateString()}. Allocation percentages are estimates; recorded expenses are actuals.`,
+      48, doc.page.height - 36
+    );
+
+    doc.end();
+  });
+}
+
+export default { buildItineraryPdf, buildBudgetPdf };

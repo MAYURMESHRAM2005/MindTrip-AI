@@ -9,6 +9,7 @@ import { live, unavailable, axiosGet, axiosPost } from './base.provider.js';
  */
 
 const GEOCODE_URL = 'https://api.geoapify.com/v1/geocode/search';
+const AUTOCOMPLETE_URL = 'https://api.geoapify.com/v1/geocode/autocomplete';
 const ROUTE_URL = 'https://api.geoapify.com/v1/routing';
 const MATRIX_URL = 'https://api.geoapify.com/v1/matrix';
 
@@ -132,6 +133,42 @@ export async function geocode(address) {
   }
 }
 
+/**
+ * As-you-type place suggestions ("Nag" → Nagpur) via the Geoapify autocomplete
+ * endpoint. Used by city/place inputs across the app.
+ */
+export async function autocomplete(text, { limit = 6, type = '' } = {}) {
+  if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
+  const q = String(text || '').trim();
+  if (q.length < 2) return unavailable('geoapify', 'Type at least 2 characters');
+  try {
+    const params = {
+      text: q,
+      limit: Math.min(Number(limit) || 6, 10),
+      format: 'json',
+      lang: 'en',
+    };
+    if (type) params.type = type;
+    const data = await apiGet(AUTOCOMPLETE_URL, params);
+    const results = (data?.results || []).map((r) => ({
+      placeId: r.place_id || '',
+      name: r.name || r.city || r.state || r.formatted || '',
+      formatted: r.formatted || '',
+      addressLine1: r.address_line1 || '',
+      city: r.city || '',
+      state: r.state || '',
+      country: r.country || '',
+      lat: r.lat != null ? r.lat : null,
+      lng: r.lon != null ? r.lon : null,
+      resultType: r.result_type || '',
+    }));
+    if (!results.length) return unavailable('geoapify', `No suggestions for "${q}"`);
+    return live('geoapify', results, 'Live suggestions from Geoapify');
+  } catch (err) {
+    return unavailable('geoapify', `Live data unavailable: ${err.message}`);
+  }
+}
+
 export async function directions(origin, destination, mode = 'driving', alternatives = true) {
   if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
   try {
@@ -218,4 +255,4 @@ export function staticMapUrl() {
   return '';
 }
 
-export default { geocode, directions, distanceMatrix, staticMapUrl };
+export default { geocode, autocomplete, directions, distanceMatrix, staticMapUrl };

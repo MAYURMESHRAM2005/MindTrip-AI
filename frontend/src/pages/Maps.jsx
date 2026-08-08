@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Map as MapIcon, Navigation, Locate, RotateCw, ThermometerSun, Droplets, Wind, Gauge, Eye, Sunrise, Sunset, Umbrella } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Input } from '../components/ui/Input';
+import PlaceAutocomplete from '../components/PlaceAutocomplete';
 import Button from '../components/ui/Button';
 import ProviderNotice from '../components/ProviderNotice';
 import { Spinner } from '../components/ui/Spinner';
@@ -22,9 +23,11 @@ function WeatherStat({ icon: Icon, color, label, value }) {
 }
 
 export default function Maps() {
-  const [destination, setDestination] = useState('Goa');
+  const queryDest = () => new URLSearchParams(window.location.search).get('destination') || '';
+  const [destination, setDestination] = useState(queryDest() || 'Goa');
   const [origin, setOrigin] = useState('');
-  const [search, setSearch] = useState(null);
+  // Topbar search (?destination=Goa) auto-loads the map on mount.
+  const [search, setSearch] = useState(() => queryDest() || null);
   const [nearby, setNearby] = useState({ results: {}, isLive: false, loading: false });
   const [route, setRoute] = useState({ loading: false, isLive: false, message: '' });
 
@@ -90,7 +93,7 @@ export default function Maps() {
 
       <div className="card mb-6 flex flex-wrap items-end gap-3 p-5">
         <div className="min-w-[200px] flex-1">
-          <Input label="Destination" value={destination} onKeyDown={(e) => e.key === 'Enter' && setSearch(destination)} onChange={(e) => setDestination(e.target.value)} />
+          <PlaceAutocomplete label="Destination" value={destination} onKeyDown={(e) => e.key === 'Enter' && setSearch(destination)} onChange={setDestination} onSelect={(s) => setSearch(s.name || s.formatted || '')} />
         </div>
         <div className="min-w-[200px] flex-1">
           <Input label="Starting point (for route)" placeholder="e.g. Hotel Taj, Goa" value={origin} onChange={(e) => setOrigin(e.target.value)} />

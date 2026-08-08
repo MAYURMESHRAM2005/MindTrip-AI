@@ -31,6 +31,11 @@ const itinerarySchema = new mongoose.Schema(
       validatedAt: { type: Date },
     },
     optimizedBudget: { type: mongoose.Schema.Types.Mixed, default: null },
+    budgetAllocation: { type: mongoose.Schema.Types.Mixed, default: null },
+    // Enriched sections rendered on the AI Itinerary page (summary, budget
+    // planning, hotels/restaurants/attractions, transport, weather, tips,
+    // recommendations, map data). Built deterministically at generation time.
+    extras: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true }
 );

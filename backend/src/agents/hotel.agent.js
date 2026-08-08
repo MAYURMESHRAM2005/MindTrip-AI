@@ -13,12 +13,14 @@ class HotelAgent extends BaseAgent {
     this.systemPrompt = HOTEL_AGENT_PROMPT;
   }
 
-  async run({ destination, checkIn, checkOut, adults, totalBudget, hotelPreference, userId }) {
+  async run({ destination, checkIn, checkOut, adults, rooms, maxPrice, totalBudget, hotelPreference, userId }) {
     const providerResult = await hotelProvider.searchHotels({
       city: destination,
       checkIn,
       checkOut,
       adults,
+      rooms: Math.max(1, Number(rooms) || 1),
+      maxPrice,
       limit: 12,
     });
 
@@ -41,7 +43,7 @@ class HotelAgent extends BaseAgent {
     }
 
     const result = await this.think({
-      prompt: `Real hotel offers for ${destination} (${checkIn} to ${checkOut}), ${adults} adults, preference: ${hotelPreference || 'any'}:
+      prompt: `Real hotel offers for ${destination} (${checkIn} to ${checkOut}), ${adults} adults, ${rooms || 1} room(s), max stay price ${maxPrice ?? 'no cap'}, preference: ${hotelPreference || 'any'}:
 ${JSON.stringify(providerResult.data, null, 2)}
 Recommend the best fit from these offers only.`,
       userId,

@@ -17,6 +17,8 @@ import safetyAgent from '../agents/safety.agent.js';
 import finalValidatorAgent from '../agents/finalValidator.agent.js';
 import budgetService from '../services/budget.service.js';
 import itineraryService from '../services/itinerary.service.js';
+import placesProvider from '../providers/places.provider.js';
+import mapsProvider from '../providers/maps.provider.js';
 import { notifyTripPlanned, notifyBudgetOptimized } from '../services/notification.service.js';
 
 function fmtDate(d) {
@@ -92,12 +94,17 @@ export async function generateTrip({ user, request }) {
     else transportResult.data = { isLive: false, selected: null, message: f.data?.message || 'Transport live data unavailable' };
   }
 
-  // 6. Hotel Agent
+  // 6. Hotel Agent — search is budget-aware so returned offers already fit
+  //    the accommodation allocation (maxPrice = hotel budget for the stay).
+  const allocation = budgetService.allocationForStyle(prefs.travelStyle || 'standard', totalBudget);
+  const rooms = budgetService.roomsForParty({ adults: request.adults, children: request.children });
   const hotelResult = await hotelAgent.run({
     destination,
     checkIn: fmtDate(request.startDate),
     checkOut: fmtDate(request.endDate),
     adults: request.adults,
+    rooms,
+    maxPrice: allocation.hotels?.amount,
     totalBudget,
     hotelPreference: prefs.hotelPreference,
     userId,
@@ -112,8 +119,33 @@ export async function generateTrip({ user, request }) {
   report.push(attractionAgent.report(attractionResult));
   report.push(restaurantAgent.report(restaurantResult));
 
+  // 7b. Real nightlife near the destination (bars, clubs, night markets).
+  //     Geocoding is guarded - a failure simply yields an empty nightlife pool
+  //     and the itinerary falls back to local attractions, never invented data.
+  let nightlifeData = [];
+  try {
+    const geo = await mapsProvider.geocode(destination);
+    if (geo.isLive && geo.data?.lat != null) {
+      const nl = await placesProvider.nearbySearch({
+        lat: geo.data.lat,
+        lng: geo.data.lng,
+        type: 'nightlife',
+        radius: 20000,
+        limit: 10,
+      });
+      if (nl.isLive) nightlifeData = nl.data || [];
+    }
+  } catch {
+    nightlifeData = [];
+  }
+  report.push({
+    agent: 'nightlife',
+    status: nightlifeData.length ? 'success' : 'degraded',
+    message: nightlifeData.length ? `${nightlifeData.length} real nightlife places found` : 'Nightlife data unavailable - local attractions used instead',
+    usedAI: false,
+  });
+
   // 8. Budget Agent (deterministic allocation + AI reasoning)
-  const allocation = budgetService.allocationForStyle(prefs.travelStyle || 'standard', totalBudget);
   const budgetResult = await budgetAgent.run({
     allocation,
     totalBudget,
@@ -128,8 +160,10 @@ export async function generateTrip({ user, request }) {
   });
   report.push(budgetAgent.report(budgetResult));
 
-  // 9. Build deterministic day-by-day itinerary
-  const days = itineraryService.buildDays({
+  // 9. Build deterministic day-by-day itinerary. The builder enforces the
+  //    user's budget as a HARD constraint - it trims the plan (drops optional
+  //    items, reduces flexible costs) so the stored total never exceeds it.
+  const plan = itineraryService.buildDaysPlan({
     origin: request.origin,
     destination,
     startDate: request.startDate,
@@ -141,9 +175,12 @@ export async function generateTrip({ user, request }) {
     weatherResult,
     attractions: attractionResult.data?.attractions || [],
     restaurants: restaurantResult.data?.restaurants || [],
+    nightlife: nightlifeData,
     budgetAllocation: allocation,
+    totalBudget,
     currency,
   });
+  const days = plan.days;
 
   const totalEstimatedCost = itineraryService.computeItineraryCost(days);
   const isOverBudget = totalEstimatedCost > totalBudget;
@@ -170,19 +207,33 @@ export async function generateTrip({ user, request }) {
   });
   report.push(finalValidatorAgent.report(validation));
 
-  // 12. Optimize budget if over budget
-  let optimized = null;
-  if (isOverBudget) {
-    const items = itineraryService.toCostItems(days, currency);
-    const opt = budgetService.optimizeCosts(items, totalBudget, {
-      emergencyReserve: allocation.emergencyReserve.amount,
-    });
-    optimized = {
-      ...opt,
-      emergencyReserve: allocation.emergencyReserve.amount,
-      notes: 'Optimized by Budget Agent: dropped low-priority items and reduced flexible costs.',
-    };
+  // 12. The itinerary builder already enforces the budget; expose its result
+  //     (non-null when trimming was actually needed) or the healthy totals.
+  let optimized = plan.optimized;
+  if (optimized && allocation.emergencyReserve) {
+    optimized = { ...optimized, emergencyReserve: allocation.emergencyReserve.amount };
   }
+
+  // 12b. Enriched itinerary sections (trip summary, budget planning, nearby
+  //      places, transport plan, weather, tips, recommendations, map data)
+  const extras = itineraryService.buildItineraryExtras({
+    request,
+    prefs,
+    days,
+    totalBudget,
+    currency,
+    allocation,
+    totalEstimatedCost,
+    hotelResult,
+    restaurantResult,
+    attractionResult,
+    transportResult,
+    weatherResult,
+    guideResult,
+    safetyResult,
+    optimized,
+    destinationHint: destinationResult?.data || null,
+  });
 
   // 13. Persist
   const trip = await Trip.create({
@@ -240,12 +291,19 @@ export async function generateTrip({ user, request }) {
       validatedAt: new Date(),
     },
     optimizedBudget: optimized,
+    budgetAllocation: allocation,
+    extras,
   });
 
   await notifyTripPlanned(userId, trip._id, trip.title);
   if (optimized) await notifyBudgetOptimized(userId, trip._id, optimized.saved);
 
   const itinerary = await Itinerary.findOne({ trip: trip._id });
+  const budgetSummary = budgetService.budgetUtilization({
+    total: totalBudget,
+    spent: optimized?.optimized ?? totalEstimatedCost,
+  });
+
   return {
     trip,
     itinerary,
@@ -255,9 +313,12 @@ export async function generateTrip({ user, request }) {
       totalBudget,
       currency,
       totalEstimatedCost,
-      remainingBudget: Math.round((totalBudget - totalEstimatedCost) * 100) / 100,
+      remainingBudget: budgetSummary.remaining,
+      budgetUsedPct: budgetSummary.usedPct,
+      withinBudget: budgetSummary.withinBudget,
       optimized,
     },
+    budgetSummary,
     validation: validation.data,
     pipelineMs: Date.now() - started,
     dataAvailability: {
@@ -266,6 +327,7 @@ export async function generateTrip({ user, request }) {
       hotelsLive: hotelResult.data?.isLive,
       attractionsLive: attractionResult.data?.isLive,
       restaurantsLive: restaurantResult.data?.isLive,
+      nightlifeLive: nightlifeData.length > 0,
     },
   };
 }
@@ -284,13 +346,13 @@ export async function optimizeTripBudget({ trip, itinerary, user }) {
     emergencyReserve: allocation.emergencyReserve.amount,
   });
 
-  // Apply optimized costs back into the itinerary (flagged as estimates)
+  // Apply optimized costs back into the itinerary (flagged as estimates).
+  // Index-based ids keep duplicate titles from colliding.
   const dayIndexById = {};
   for (const day of itinerary.days) {
-    for (const act of day.activities) {
-      const key = `${day.dayNumber}-${act.title}`;
-      dayIndexById[key] = act;
-    }
+    (day.activities || []).forEach((act, i) => {
+      dayIndexById[itineraryService.activityItemId(day.dayNumber, i)] = act;
+    });
   }
   for (const r of opt.reductions) {
     const act = dayIndexById[r.id];
@@ -309,10 +371,22 @@ export async function optimizeTripBudget({ trip, itinerary, user }) {
     }
   }
   // Keep per-day costs consistent with the optimized activities
-  for (const day of itinerary.days) {
-    day.dayCost = Math.round(day.activities.reduce((s, a) => s + (a.cost?.amount || 0), 0) * 100) / 100;
-  }
+  itineraryService.finalizeDayCosts(itinerary.days, {
+    partySize: Math.max(1, Number(trip.travelers?.adults) + Number(trip.travelers?.children) || 1),
+    totalBudget: trip.budget.total,
+  });
   itinerary.totalEstimatedCost = opt.optimized;
+  itinerary.budgetAllocation = allocation;
+  itinerary.optimizedBudget = {
+    ...opt,
+    emergencyReserve: allocation.emergencyReserve.amount,
+    notes: 'Optimized by Budget Agent: dropped low-priority items and reduced flexible costs.',
+  };
+  // Mixed fields aren't diff-tracked by Mongoose - mark them explicitly so
+  // the persisted document reflects the optimized breakdowns.
+  for (const day of itinerary.days) {
+    if (typeof day.markModified === 'function') day.markModified('costBreakdown');
+  }
   await itinerary.save();
 
   trip.totalOptimizedCost = opt.optimized;

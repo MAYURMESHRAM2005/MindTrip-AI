@@ -29,7 +29,7 @@ export const resetPasswordSchema = Joi.object({
     .required(),
 });
 
-export const googleSchema = Joi.object({
+export const firebaseSchema = Joi.object({
   idToken: Joi.string().required(),
 });
 

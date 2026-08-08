@@ -1,11 +1,6 @@
-import ApiError from '../utils/ApiError.js';
 import ApiResponse from '../utils/ApiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import authService from '../services/auth.service.js';
-import env from '../config/env.js';
-
-const ACCESS_COOKIE_MAX = 15 * 60 * 1000;
-const REFRESH_COOKIE_MAX = 7 * 24 * 60 * 60 * 1000;
 
 function setCookies(res, accessToken, refreshToken) {
   authService.setAuthCookies(res, accessToken, refreshToken);
@@ -63,26 +58,10 @@ export const resetPassword = asyncHandler(async (req, res) => {
   res.json(ApiResponse.ok('Password reset successfully. Please log in.', { user }));
 });
 
-export const googleRedirect = asyncHandler(async (req, res) => {
-  if (!env.GOOGLE_CLIENT_ID) {
-    throw ApiError.badRequest('Google OAuth is not configured on the server');
-  }
-  res.redirect(authService.googleAuthUrl('travelmind'));
-});
-
-export const googleCallback = asyncHandler(async (req, res) => {
-  const { code } = req.query;
-  if (!code) throw ApiError.badRequest('Missing authorization code');
-  const { info } = await authService.googleCallback(code);
-  const result = await authService.googleLogin(info, req);
+export const firebaseToken = asyncHandler(async (req, res) => {
+  const result = await authService.firebaseLogin(req.body.idToken, req);
   setCookies(res, result.accessToken, result.refreshToken);
-  res.redirect(`${env.FRONTEND_URL}/dashboard?oauth=success`);
-});
-
-export const googleToken = asyncHandler(async (req, res) => {
-  const result = await authService.googleLogin(req.body.idToken, req);
-  setCookies(res, result.accessToken, result.refreshToken);
-  res.json(ApiResponse.ok('Google sign-in successful', { user: result.user }));
+  res.json(ApiResponse.ok('Google sign-in successful', { user: result.user, accessToken: result.accessToken }));
 });
 
 export default {
@@ -94,7 +73,5 @@ export default {
   verifyEmail,
   forgotPassword,
   resetPassword,
-  googleRedirect,
-  googleCallback,
-  googleToken,
+  firebaseToken,
 };

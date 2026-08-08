@@ -39,8 +39,14 @@ coverage/
 backend/uploads/
 backend/public/uploads/
 
-# Misc
+# Secrets
 *.pem
 *.key
+*.json.enc
+# Firebase service-account private keys (load via FIREBASE_SERVICE_ACCOUNT / _PATH env vars instead)
+firebase-admin.json
+firebase-adminsdk*.json
+
+# Misc
 .cache/
 .tmp/

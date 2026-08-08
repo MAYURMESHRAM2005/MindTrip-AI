@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import ItineraryTimeline from '../components/ItineraryTimeline';
+import ItineraryEnrichment from '../components/itinerary/ItineraryEnrichment';
 import TripSelect from '../components/TripSelect';
 import { tripApi } from '../services/apiClient';
 import { errorMessage } from '../services/api';
@@ -54,7 +55,9 @@ export default function ItineraryPage() {
 
   const { trip, itinerary } = data;
   const currency = trip.budget.currency || 'INR';
-  const remaining = trip.budget.total - trip.totalEstimatedCost;
+  const estimated = itinerary.totalEstimatedCost ?? trip.totalEstimatedCost;
+  const remaining = trip.budget.total - estimated;
+  const usedPct = trip.budget.total > 0 ? Math.min(100, Math.round((estimated / trip.budget.total) * 1000) / 10) : 0;
 
   return (
     <div>
@@ -83,12 +86,26 @@ export default function ItineraryPage() {
         </div>
         <div className="card p-4">
           <p className="text-xs font-semibold uppercase text-slate-400">Estimated cost</p>
-          <p className="mt-1 text-lg font-extrabold text-slate-900 dark:text-white">{formatCurrency(trip.totalEstimatedCost, currency)}</p>
+          <p className="mt-1 text-lg font-extrabold text-slate-900 dark:text-white">{formatCurrency(estimated, currency)}</p>
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${remaining >= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}
+              style={{ width: `${Math.min(100, usedPct)}%` }}
+            />
+          </div>
+          <p className={`mt-1 text-[11px] font-semibold ${remaining >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+            {usedPct}% of budget used
+          </p>
         </div>
         <div className="card p-4">
           <p className="text-xs font-semibold uppercase text-slate-400">Remaining</p>
           <p className={`mt-1 text-lg font-extrabold ${remaining >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
             {formatCurrency(remaining, currency)}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            {itinerary.budgetAllocation?.emergencyReserve?.amount > 0
+              ? `Emergency reserve ${formatCurrency(itinerary.budgetAllocation.emergencyReserve.amount, currency)} kept untouched`
+              : ''}
           </p>
         </div>
         <div className="card p-4">
@@ -134,6 +151,11 @@ export default function ItineraryPage() {
       )}
 
       <ItineraryTimeline days={itinerary.days} currency={currency} />
+
+      {/* Enriched sections: trip summary, budget planning, nearby places,
+          transport plan, daily weather, interactive map, tips & AI picks.
+          Built by the backend at generation time - existing UI untouched. */}
+      <ItineraryEnrichment extras={itinerary.extras} currency={currency} />
 
       {/* Safety notes */}
       {itinerary.safetyNotes && (

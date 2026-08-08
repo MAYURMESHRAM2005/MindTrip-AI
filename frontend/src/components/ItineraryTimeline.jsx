@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import {
   Plane, TrainFront, Bus, Hotel, UtensilsCrossed, Landmark, Activity,
-  CloudSun, AlertTriangle, Clock, MapPin, Navigation,
+  CloudSun, AlertTriangle, Clock, MapPin, Navigation, Map, Moon, Wallet,
 } from 'lucide-react';
 import { DataStatusBadge } from './ui/Badge';
 import { formatCurrency, formatDateShort } from '../utils/format';
@@ -46,16 +46,18 @@ function ActivityRow({ activity, currency }) {
         {activity.description && (
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{activity.description}</p>
         )}
-        {(activity.address || activity.bookingUrl) && (
+        {(activity.address || activity.bookingUrl || activity.travel?.durationMin > 0 || activity.travel?.distanceKm > 0) && (
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
             {activity.address && (
               <span className="inline-flex items-center gap-1">
                 <MapPin className="h-3 w-3" /> {activity.address}
               </span>
             )}
-            {activity.travel?.durationMin > 0 && (
+            {(activity.travel?.distanceKm > 0 || activity.travel?.durationMin > 0) && (
               <span className="inline-flex items-center gap-1">
-                <Navigation className="h-3 w-3" /> {activity.travel.durationMin} min {activity.travel.method}
+                <Navigation className="h-3 w-3" />
+                {activity.travel.distanceKm > 0 && `${activity.travel.distanceKm} km · `}
+                {activity.travel.durationMin} min {activity.travel.method}
                 {activity.travel.isEstimate && ' (est.)'}
               </span>
             )}
@@ -74,8 +76,62 @@ function ActivityRow({ activity, currency }) {
         {activity.cost?.isEstimate && activity.cost?.amount > 0 && (
           <p className="text-[10px] font-medium uppercase tracking-wide text-amber-500">estimate</p>
         )}
+        {activity.cost?.perPerson > 0 && (
+          <p className="text-[10px] text-slate-400">≈ {formatCurrency(activity.cost.perPerson, currency)}/person</p>
+        )}
       </div>
     </motion.div>
+  );
+}
+
+const BREAKDOWN_ROWS = [
+  ['accommodation', 'Accommodation'],
+  ['breakfast', 'Breakfast'],
+  ['lunch', 'Lunch'],
+  ['dinner', 'Dinner'],
+  ['transport', 'Transport'],
+  ['activities', 'Activities'],
+  ['evening', 'Evening'],
+  ['night', 'Night activity'],
+];
+
+function DayCostBreakdown({ breakdown, currency }) {
+  if (!breakdown || typeof breakdown.dayTotal !== 'number') return null;
+  const rows = BREAKDOWN_ROWS.filter(([k]) => breakdown[k] > 0);
+  return (
+    <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
+      <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+        <Wallet className="h-3.5 w-3.5" /> Day cost breakdown
+      </p>
+      <div className="mt-2.5 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3">
+        {rows.map(([k, label]) => (
+          <div key={k} className="flex items-baseline justify-between gap-2 text-xs">
+            <span className="text-slate-500 dark:text-slate-400">{label}</span>
+            <span className="font-bold text-slate-800 dark:text-slate-100">{formatCurrency(breakdown[k], currency)}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-200/70 pt-3 dark:border-slate-700/70 sm:grid-cols-4">
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-slate-400">Day total</p>
+          <p className="text-sm font-extrabold text-slate-900 dark:text-white">{formatCurrency(breakdown.dayTotal, currency)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-slate-400">Per person</p>
+          <p className="text-sm font-extrabold text-slate-900 dark:text-white">{formatCurrency(breakdown.perPerson, currency)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-slate-400">Cumulative</p>
+          <p className="text-sm font-extrabold text-slate-900 dark:text-white">{formatCurrency(breakdown.cumulative, currency)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase text-slate-400">Remaining budget</p>
+          <p className={`text-sm font-extrabold ${breakdown.remainingBudget >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+            {formatCurrency(breakdown.remainingBudget, currency)}
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -99,17 +155,25 @@ export default function ItineraryTimeline({ days = [], currency = 'INR' }) {
                 {day.dayNumber}
               </span>
               <div>
-                <p className="text-sm font-bold text-slate-900 dark:text-white">Day {day.dayNumber}</p>
+                <p className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                  Day {day.dayNumber}
+                  {day.area && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-700 dark:bg-brand-950 dark:text-brand-300">
+                      <Map className="h-3 w-3" /> {day.area}
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">{formatDateShort(day.date)}</p>
               </div>
             </div>
-            <div className="flex items-center gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
               {day.weather?.condition && (
                 <span className="inline-flex items-center gap-1 rounded-lg bg-sky-50 px-2 py-1 font-semibold text-sky-700 dark:bg-sky-950 dark:text-sky-300">
                   <CloudSun className="h-3.5 w-3.5" />
-                  {day.weather.temp != null && `${Math.round(day.weather.temp)}°C `}
+                  {day.weather.tempMax != null && `${Math.round(day.weather.tempMax)}°C `}
                   {day.weather.condition}
                   {day.weather.rainProbability > 40 && ` 🌧 ${day.weather.rainProbability}%`}
+                  {day.weather.indoorPlan && ' · 🏠 indoor'}
                 </span>
               )}
               <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
@@ -118,11 +182,35 @@ export default function ItineraryTimeline({ days = [], currency = 'INR' }) {
               </span>
             </div>
           </div>
+
+          {day.overnight && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 bg-indigo-50/50 px-5 py-2.5 text-xs dark:border-slate-800 dark:bg-indigo-950/20">
+              <span className="inline-flex items-center gap-1.5 font-bold text-indigo-700 dark:text-indigo-300">
+                <Moon className="h-3.5 w-3.5" /> Overnight: {day.overnight.name}
+              </span>
+              {day.overnight.area && <span className="text-slate-500 dark:text-slate-400">· {day.overnight.area}</span>}
+              {day.overnight.pricePerRoomNight > 0 && (
+                <span className="text-slate-500 dark:text-slate-400">
+                  · {formatCurrency(day.overnight.pricePerRoomNight, currency)}/room/night × {day.overnight.rooms} room(s)
+                  {day.overnight.nights > 0 ? ` × ${day.overnight.nights} night(s)` : ''} ={' '}
+                  <b className="text-slate-800 dark:text-slate-100">{formatCurrency(day.overnight.total, currency)}</b>
+                </span>
+              )}
+              {day.overnight.isLive ? (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">live</span>
+              ) : (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300">estimated</span>
+              )}
+            </div>
+          )}
+
           <div className="divide-y divide-slate-100 dark:divide-slate-800/70">
             {day.activities.map((activity, i) => (
               <ActivityRow key={activity._id || i} activity={activity} currency={currency} />
             ))}
           </div>
+
+          <DayCostBreakdown breakdown={day.costBreakdown} currency={currency} />
         </div>
       ))}
     </div>

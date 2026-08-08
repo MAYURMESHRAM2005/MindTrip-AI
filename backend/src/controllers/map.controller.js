@@ -9,6 +9,15 @@ export const geocode = asyncHandler(async (req, res) => {
   res.json(ApiResponse.ok(result.message, { geocode: result.data, isLive: result.isLive }));
 });
 
+export const autocomplete = asyncHandler(async (req, res) => {
+  const { q, type, limit } = req.query;
+  const result = await mapsProvider.autocomplete(q, { type, limit });
+  if (!result.isLive) {
+    return res.json(ApiResponse.ok(result.message, { suggestions: [], isLive: false, message: result.message }));
+  }
+  res.json(ApiResponse.ok(result.message, { suggestions: result.data, isLive: true }));
+});
+
 export const directions = asyncHandler(async (req, res) => {
   const { origin, destination, mode, alternatives } = req.query;
   // Accept both the URL string form (?alternatives=false) and coerced boolean.
@@ -74,4 +83,4 @@ export const nearbyPoints = asyncHandler(async (req, res) => {
   );
 });
 
-export default { geocode, directions, nearbyPoints };
+export default { geocode, autocomplete, directions, nearbyPoints };

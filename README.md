@@ -16,8 +16,8 @@ root/
 
 ## ⚡ Highlights
 
-- **Real authentication** — JWT access tokens (memory) + rotating refresh tokens (httpOnly cookies), bcrypt password hashing, email verification, forgot/reset password, Google OAuth, RBAC (`user` / `admin`).
-- **Multi-Agent LLM architecture** — Orchestrator, User Preference, Destination, Budget, Flight, Train, Bus, Hotel, Restaurant, Attraction, Weather, Traffic, Local Guide, Safety, Expense, Translation, Final Validator. External-data agents fetch **real data first** (Amadeus, Geoapify Places, OpenWeatherMap) and Gemini only *reasons* over it.
+- **Real authentication** — JWT access tokens (memory) + rotating refresh tokens (httpOnly cookies), bcrypt password hashing, email verification, forgot/reset password, Google sign-in via Firebase Authentication, RBAC (`user` / `admin`).
+- **Multi-Agent LLM architecture** — Orchestrator, User Preference, Destination, Budget, Flight, Train, Bus, Hotel, Restaurant, Attraction, Weather, Traffic, Local Guide, Safety, Expense, Translation, Final Validator. External-data agents fetch **real data first** (AviationStack, Amadeus, Geoapify Places, OpenWeatherMap) and Gemini only *reasons* over it.
 - **Deterministic Budget Optimizer** — allocation and optimization are plain arithmetic (tested), not LLM guesswork. Drops low-priority items and reduces flexible costs when over budget, showing original vs optimized vs saved.
 - **Final Validator Agent** — verifies budget ≤ limit, date consistency, time overlaps, hotel/transport/restaurant fit, and that estimates/live data are correctly labelled.
 - **Everything else** — interactive Leaflet maps with traffic-aware routes, hotels, flights, trains, buses, restaurants, weather, contextual chatbot that really edits your trip, voice assistant, image search, expense tracker with charts, PWA offline itinerary, emergency center, QR ticket wallet, PDF itinerary, multi-language (en/hi/mr), and a full admin dashboard.
@@ -37,7 +37,7 @@ User Request
 │ Destination Agent ── chooses / validates destination     │
 ├─────────────────────────────────────────────────────────┤
 │  EXTERNAL-DATA AGENTS (real providers FIRST)             │
-│  Flight → Amadeus        Hotel → Amadeus                 │
+│  Flight → AviationStack Hotel → Amadeus                 │
 │  Train/Bus → configured API   Weather → OpenWeatherMap   │
 │  Restaurant/Attraction → Geoapify Places   Traffic → Geoapify │
 ├─────────────────────────────────────────────────────────┤
@@ -68,7 +68,7 @@ Validated Trip + Itinerary (persisted in MongoDB)
 | Backend | Node 18+, Express, Mongoose, JWT, bcryptjs, cookie-parser, helmet, cors, express-rate-limit, compression, morgan, Joi, multer, nodemailer, pdfkit, @google/generative-ai, node:test + supertest |
 | Database | MongoDB (local or Atlas) |
 | AI | Google Gemini **3.5 Flash** (`gemini-3.5-flash` default, configurable via `GEMINI_MODEL`) |
-| APIs | Amadeus (flights/hotels), Geoapify (geocoding, routing, places), OpenWeatherMap, open.er-api.com (FX), configurable train/bus endpoints |
+| APIs | AviationStack (flights), Amadeus (hotels), Geoapify (geocoding, routing, places), OpenWeatherMap, open.er-api.com (FX), configurable train/bus endpoints |
 
 ---
 
@@ -80,7 +80,7 @@ Validated Trip + Itinerary (persisted in MongoDB)
   - **Google AI Studio** → `GEMINI_API_KEY` (required for AI features)
   - **Geoapify** → `GEOAPIFY_API_KEY` (backend only — the frontend never holds keys)
   - **OpenWeatherMap** → `OPENWEATHER_API_KEY`
-  - **Amadeus for Developers** → `AMADEUS_CLIENT_ID/SECRET`
+  - **AviationStack** → `AVIATIONSTACK_API_KEY` (flights)  •  **Amadeus for Developers** → `AMADEUS_CLIENT_ID/SECRET` (hotels)
 
 ---
 
@@ -127,14 +127,16 @@ npm start                # runs the backend (serve frontend/dist with any static
 | `GEMINI_API_KEY` | Google Gemini API key |
 | `GEOAPIFY_API_KEY` | Geocoding, Routing, Places (server-side agents & endpoints) |
 | `OPENWEATHER_API_KEY` | Weather (server-side proxy) |
-| `AMADEUS_CLIENT_ID` / `AMADEUS_CLIENT_SECRET` | Flights & hotels |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth |
-| `TRAIN_API_URL` / `TRAIN_API_KEY` | Optional configured train provider |
-| `BUS_API_URL` / `BUS_API_KEY` | Optional configured bus provider |
+| `AVIATIONSTACK_API_KEY` | Flights (free tier at aviationstack.com) |
+| `AMADEUS_CLIENT_ID` / `AMADEUS_CLIENT_SECRET` | Hotels |
+| `FIREBASE_PROJECT_ID` / `FIREBASE_SERVICE_ACCOUNT` | Firebase Authentication (Google sign-in) — backend |
+| `TRAIN_API_URL` / `TRAIN_API_KEY` / `TRAIN_API_ENDPOINT` | Optional configured train provider — `https://` is auto-added; RapidAPI hosts use `x-rapidapi-key`; `TRAIN_API_ENDPOINT` (default `/search`) is the search path |
+| `BUS_API_URL` / `BUS_API_KEY` / `BUS_API_ENDPOINT` | Optional configured bus provider (same rules as trains) |
 | `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` | Verification/reset emails |
+| `FIREBASE_PROJECT_ID` / `FIREBASE_SERVICE_ACCOUNT` | Google sign-in (Firebase Auth) — see Provider Setup below |
 | `FRONTEND_URL` | CORS whitelist + email links |
 
-**Never commit `.env`.** All API keys live **only in `backend/.env`** (`GEOAPIFY_API_KEY`, `OPENWEATHER_API_KEY`, `AMADEUS_*`, etc.). The frontend never holds keys and never calls external APIs directly — every request goes through the backend, which proxies Geoapify, OpenWeatherMap and future providers via `/api/geocode`, `/api/routes`, `/api/maps`, `/api/weather`, `/api/restaurants`, `/api/hotels`.
+**Never commit `.env`.** All API keys live **only in `backend/.env`** (`GEOAPIFY_API_KEY`, `OPENWEATHER_API_KEY`, `AVIATIONSTACK_API_KEY`, `AMADEUS_*`, etc.). The frontend never holds keys and never calls external APIs directly — every request goes through the backend, which proxies Geoapify, OpenWeatherMap and future providers via `/api/geocode`, `/api/routes`, `/api/maps`, `/api/weather`, `/api/restaurants`, `/api/hotels`.
 
 ---
 
@@ -157,8 +159,9 @@ Models: `User`, `RefreshToken`, `UserPreference`, `Trip`, `Itinerary`, `Itinerar
 | Gemini | [Google AI Studio](https://aistudio.google.com/app/apikey) | [Generative AI docs](https://ai.google.dev/gemini-api/docs) |
 | Geoapify | [myprojects.geoapify.com](https://myprojects.geoapify.com) → create a key; use a referrer-restricted browser key for the frontend | [Geoapify docs](https://apidocs.geoapify.com) |
 | OpenWeatherMap | [openweathermap.org](https://home.openweathermap.org/api_keys) | [Weather API](https://openweathermap.org/api) |
-| Amadeus | [Amadeus for Developers](https://developers.amadeus.com) — free test credentials | [Flight Offers](https://developers.amadeus.com/self-service/category/flights) |
-| Google OAuth | [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials) | [OAuth 2.0](https://developers.google.com/identity/protocols/oauth2) |
+| AviationStack | [aviationstack.com](https://aviationstack.com) — free tier (real-time + airport lookup; schedules on paid plan) | [Flight API docs](https://aviationstack.com/documentation) |
+| Amadeus | [Amadeus for Developers](https://developers.amadeus.com) — free test credentials (hotels) | [Hotel Offers](https://developers.amadeus.com/self-service/category/hotels) |
+| Firebase Auth | [Firebase Console → Authentication](https://console.firebase.google.com/) — enable Google provider, register a web app, create a service account | [Firebase Auth docs](https://firebase.google.com/docs/auth) |
 | Trains/Buses | Any compliant provider — the app calls `${URL}/search` with `{from,to,date,passengers}` | see `backend/src/providers/train.provider.js` |
 
 > Without keys the app still works: every feature shows real live data when available and an honest **"Live data unavailable"** notice (with external booking links) otherwise. Admin → Providers shows exactly what is configured.

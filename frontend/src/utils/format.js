@@ -11,6 +11,13 @@ export function formatCurrency(amount, currency = 'INR') {
   }
 }
 
+/** Today's date as YYYY-MM-DD (local time) — used to disable past dates on date inputs. */
+export function todayISO() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export function formatDate(date) {
   if (!date) return '—';
   const d = new Date(date);

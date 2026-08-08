@@ -3,9 +3,9 @@ import { WEATHER_AGENT_PROMPT } from '../prompts/agentPrompts.js';
 import weatherProvider from '../providers/weather.provider.js';
 
 /**
- * Fetches real weather FIRST, then lets Gemini advise on how to adapt the
- * itinerary. When the provider or AI is unavailable the result degrades
- * gracefully - never invented weather.
+ * Fetches real weather FIRST (forecast + current, for sunrise/sunset), then
+ * lets Gemini advise on how to adapt the itinerary. When the provider or AI
+ * is unavailable the result degrades gracefully - never invented weather.
  */
 class WeatherAgent extends BaseAgent {
   constructor() {
@@ -14,12 +14,16 @@ class WeatherAgent extends BaseAgent {
   }
 
   async run({ destination, startDate, endDate, userId }) {
-    const providerResult = await weatherProvider.forecast({ city: destination });
+    const [providerResult, currentResult] = await Promise.all([
+      weatherProvider.forecast({ city: destination }),
+      weatherProvider.currentWeather({ city: destination }),
+    ]);
 
     const base = {
       provider: providerResult.isLive ? 'live' : 'unavailable',
       providerMessage: providerResult.message,
       forecast: providerResult.data || null,
+      current: currentResult.isLive ? currentResult.data : null,
     };
 
     if (!providerResult.isLive) {

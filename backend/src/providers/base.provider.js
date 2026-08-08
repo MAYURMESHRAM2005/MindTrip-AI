@@ -60,4 +60,33 @@ export async function axiosPost(url, body = null, config = {}, timeoutMs = 10000
   const { data } = await http.post(url, body, { ...config, timeout: timeoutMs });
   return data;
 }
-export default { unavailable, live, axiosGet, axiosPost };
+
+/**
+ * Normalize a configured provider base URL: add https:// when the protocol is
+ * missing (a common .env mistake that otherwise yields "Invalid URL").
+ */
+export function providerBaseUrl(host) {
+  let url = String(host || '').trim();
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  return url.replace(/\/+$/, '');
+}
+
+/**
+ * Build auth headers for a configured provider. RapidAPI hosts authenticate
+ * via x-rapidapi-key/x-rapidapi-host; other providers use a Bearer token.
+ */
+export function providerHeaders(host, apiKey) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (!apiKey) return headers;
+  const h = providerBaseUrl(host).replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  if (/\.p\.rapidapi\.com$/i.test(h)) {
+    headers['x-rapidapi-key'] = apiKey;
+    headers['x-rapidapi-host'] = h;
+  } else {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+  return headers;
+}
+
+export default { unavailable, live, axiosGet, axiosPost, providerBaseUrl, providerHeaders };

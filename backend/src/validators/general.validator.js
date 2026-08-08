@@ -18,6 +18,22 @@ export const searchQuery = Joi.object({
   nonVeg: Joi.boolean().default(false),
 });
 
+// Same fields as searchQuery, but the keyword is optional when a city/place is
+// given (or when coordinates are provided for a nearby search), and the city
+// is optional when a keyword is given.
+export const restaurantSearchQuery = searchQuery
+  .keys({
+    q: Joi.string().trim().min(1).max(120).allow(''),
+    city: Joi.string().trim().min(2).max(120).allow(''),
+  })
+  .or('q', 'city', 'lat');
+
+export const autocompleteQuery = Joi.object({
+  q: Joi.string().trim().min(2).max(120).required(),
+  type: Joi.string().allow('').max(60),
+  limit: Joi.number().integer().min(1).max(10).default(6),
+});
+
 export const geocodeQuery = Joi.object({
   address: Joi.string().trim().min(2).max(200).required(),
 });

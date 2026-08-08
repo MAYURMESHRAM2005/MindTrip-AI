@@ -3,19 +3,35 @@ import { useQuery } from '@tanstack/react-query';
 import { Plane, Search, Clock, MapPin } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Input, Select } from '../components/ui/Input';
+import PlaceAutocomplete from '../components/PlaceAutocomplete';
 import Button from '../components/ui/Button';
 import ProviderNotice from '../components/ProviderNotice';
 import { flightsApi } from '../services/apiClient';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, todayISO } from '../utils/format';
 import { Spinner } from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
 
+function flightsFromQuery() {
+  const sp = new URLSearchParams(window.location.search);
+  const to = sp.get('to') || '';
+  return {
+    origin: sp.get('from') || '',
+    destination: to,
+    departDate: sp.get('date') || todayISO(),
+    returnDate: sp.get('returnDate') || '',
+    adults: 1,
+    travelClass: 'ECONOMY',
+    nonStop: false,
+  };
+}
+
 export default function Flights() {
-  const [params, setParams] = useState({
-    origin: 'BOM', destination: 'GOI', departDate: '', returnDate: '',
-    adults: 1, travelClass: 'ECONOMY', nonStop: false,
+  const [params, setParams] = useState(flightsFromQuery);
+  // Topbar search (?to=Goa) should auto-run the search on mount.
+  const [search, setSearch] = useState(() => {
+    const sp = new URLSearchParams(window.location.search);
+    return sp.get('to') || sp.get('from') ? flightsFromQuery() : null;
   });
-  const [search, setSearch] = useState(null);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['flights', search],
@@ -30,14 +46,14 @@ export default function Flights() {
 
   return (
     <div>
-      <PageHeader icon={Plane} title="Flights" subtitle="Live flight offers from Amadeus when configured." />
+      <PageHeader icon={Plane} title="Flights" subtitle="Live flight data from AviationStack." />
 
       <div className="card mb-6 p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Input label="From (IATA)" placeholder="BOM" value={params.origin} onChange={(e) => setParams({ ...params, origin: e.target.value.toUpperCase() })} />
-          <Input label="To (IATA)" placeholder="GOI" value={params.destination} onChange={(e) => setParams({ ...params, destination: e.target.value.toUpperCase() })} />
-          <Input label="Departure" type="date" value={params.departDate} onChange={(e) => setParams({ ...params, departDate: e.target.value })} />
-          <Input label="Return (optional)" type="date" value={params.returnDate} onChange={(e) => setParams({ ...params, returnDate: e.target.value })} />
+          <PlaceAutocomplete label="From" placeholder="Mumbai, Delhi…" value={params.origin} onChange={(v) => setParams({ ...params, origin: v })} />
+          <PlaceAutocomplete label="To" placeholder="Goa, Pune…" value={params.destination} onChange={(v) => setParams({ ...params, destination: v })} />
+          <Input label="Departure" type="date" min={todayISO()} value={params.departDate} onChange={(e) => setParams({ ...params, departDate: e.target.value })} />
+          <Input label="Return (optional)" type="date" min={params.departDate || todayISO()} value={params.returnDate} onChange={(e) => setParams({ ...params, returnDate: e.target.value })} />
           <Input label="Passengers" type="number" min={1} max={9} value={params.adults} onChange={(e) => setParams({ ...params, adults: Number(e.target.value) || 1 })} />
           <Select label="Class" value={params.travelClass} onChange={(e) => setParams({ ...params, travelClass: e.target.value })} options={['ECONOMY', 'PREMIUM_ECONOMY', 'BUSINESS', 'FIRST']} />
           <label className="flex items-end gap-2 pb-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
@@ -55,14 +71,19 @@ export default function Flights() {
       {data && !data.isLive && (
         <ProviderNotice
           title="Live flight data unavailable"
-          message={data.message || 'The Amadeus flight provider is not configured or returned no results.'}
+          message={data.message || 'AviationStack is not returning live data. Check that AVIATIONSTACK_API_KEY is set in backend/.env and that your AviationStack plan quota has not been reached.'}
           externalSources={[{ name: 'Google Flights', url: 'https://www.google.com/travel/flights' }, { name: 'Skyscanner', url: 'https://www.skyscanner.net' }]}
         />
       )}
 
       {data?.isLive && (
         <div className="space-y-3">
-          <p className="text-xs font-semibold text-emerald-600">● Live offers from {data.provider}</p>
+          <p className="text-xs font-semibold text-emerald-600">
+            ● Live from {data.provider === 'aviationstack-flights' ? 'AviationStack' : data.provider}
+          </p>
+          {data.message && (
+            <p className="text-xs text-slate-500 dark:text-slate-400">{data.message}</p>
+          )}
           {data.flights.length === 0 ? (
             <div className="card p-8 text-center text-sm text-slate-500">No flights found for this route and date.</div>
           ) : (
@@ -77,19 +98,21 @@ export default function Flights() {
                       {f.airline} {f.flightNumber}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {f.origin} → {f.destination} · {f.duration}
+                      {f.origin} → {f.destination}{f.duration ? ` · ${f.duration}` : ''}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4 text-sm">
                   <span className="inline-flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-200">
                     <Clock className="h-4 w-4 text-slate-400" />
-                    {new Date(f.departAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {f.departAt ? new Date(f.departAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
                   </span>
                   <Badge tone={f.stops === 0 ? 'green' : 'amber'}>{f.stops === 0 ? 'Non-stop' : `${f.stops} stop${f.stops > 1 ? 's' : ''}`}</Badge>
                 </div>
                 <div className="text-right">
-                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">{formatCurrency(f.price.amount, f.price.currency)}</p>
+                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">
+                    {f.price?.amount ? formatCurrency(f.price.amount, f.price.currency) : 'Price on request'}
+                  </p>
                   <a href={f.bookingUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-brand-600 hover:underline dark:text-brand-400">
                     View on provider →
                   </a>
