@@ -2,6 +2,7 @@ import React from 'react';
 import { Sparkles, MapPin, UtensilsCrossed, Coffee, ShoppingBag, Users, Gem } from 'lucide-react';
 import Card, { CardHeader } from '../ui/Card';
 import Badge from '../ui/Badge';
+import { useI18n } from '../../utils/i18n';
 
 function ChipList({ icon: Icon, title, items, tone }) {
   if (!items?.length) return null;
@@ -29,6 +30,7 @@ function ChipList({ icon: Icon, title, items, tone }) {
 }
 
 export default function RecommendationsCard({ recommendations }) {
+  const { t } = useI18n();
   if (!recommendations) return null;
   const hasAny = Object.values(recommendations).some((v) => Array.isArray(v) && v.length);
   if (!hasAny) return null;
@@ -37,17 +39,17 @@ export default function RecommendationsCard({ recommendations }) {
     <Card className="mb-6">
       <CardHeader
         icon={Sparkles}
-        title="AI recommendations"
-        subtitle="Curated highlights for your trip"
-        action={<Badge tone="violet">AI curated</Badge>}
+        title={t('AI recommendations')}
+        subtitle={t('Curated highlights for your trip')}
+        action={<Badge tone="violet">{t('AI curated')}</Badge>}
       />
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <ChipList icon={MapPin} title="Must-visit places" items={recommendations.mustVisitPlaces} tone="violet" />
-        <ChipList icon={UtensilsCrossed} title="Best restaurants" items={recommendations.bestRestaurants} tone="rose" />
-        <ChipList icon={Coffee} title="Best cafes" items={recommendations.bestCafes} tone="amber" />
-        <ChipList icon={ShoppingBag} title="Shopping areas" items={recommendations.bestShoppingAreas} tone="emerald" />
-        <ChipList icon={Users} title="Family friendly" items={recommendations.familyFriendlyAttractions} tone="sky" />
-        <ChipList icon={Gem} title="Hidden gems" items={recommendations.hiddenGems} tone="violet" />
+        <ChipList icon={MapPin} title={t('Must-visit places')} items={recommendations.mustVisitPlaces} tone="violet" />
+        <ChipList icon={UtensilsCrossed} title={t('Best restaurants')} items={recommendations.bestRestaurants} tone="rose" />
+        <ChipList icon={Coffee} title={t('Best cafes')} items={recommendations.bestCafes} tone="amber" />
+        <ChipList icon={ShoppingBag} title={t('Shopping areas')} items={recommendations.bestShoppingAreas} tone="emerald" />
+        <ChipList icon={Users} title={t('Family friendly')} items={recommendations.familyFriendlyAttractions} tone="sky" />
+        <ChipList icon={Gem} title={t('Hidden gems')} items={recommendations.hiddenGems} tone="violet" />
       </div>
     </Card>
   );

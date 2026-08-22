@@ -8,6 +8,7 @@ import ProviderNotice from '../components/ProviderNotice';
 import { Spinner } from '../components/ui/Spinner';
 import { formatDate } from '../utils/format';
 import { getCurrentWeather, getForecast, formatSunTime, weatherIconUrl } from '../services/weatherService';
+import { useI18n } from '../utils/i18n';
 
 function Stat({ icon: Icon, color, label, value }) {
   return (
@@ -20,6 +21,7 @@ function Stat({ icon: Icon, color, label, value }) {
 }
 
 export default function Weather() {
+  const { t } = useI18n();
   const [city, setCity] = useState(() => new URLSearchParams(window.location.search).get('city') || '');
   const [search, setSearch] = useState(() => new URLSearchParams(window.location.search).get('city') || 'Goa');
 
@@ -39,19 +41,19 @@ export default function Weather() {
 
   return (
     <div>
-      <PageHeader icon={CloudSun} title="Weather" subtitle="Live forecasts from OpenWeatherMap." />
+      <PageHeader icon={CloudSun} title={t('Weather')} subtitle={t('Live forecasts from OpenWeatherMap.')} />
 
       <div className="mb-6 flex max-w-md gap-2">
         <PlaceAutocomplete placeholder="City, e.g. Goa" value={city} onKeyDown={(e) => e.key === 'Enter' && setSearch(city)} onChange={setCity} onSelect={(s) => setSearch(s.name || s.formatted || '')} />
-        <Button icon={Search} onClick={() => setSearch(city)}>Check</Button>
+        <Button icon={Search} onClick={() => setSearch(city)}>{t('Check')}</Button>
       </div>
 
       {isLoading && <div className="flex justify-center py-12"><Spinner size="lg" /></div>}
 
       {!isLoading && !live && (
         <ProviderNotice
-          title="Live weather data unavailable"
-          message={current?.message || 'Live weather is temporarily unavailable.'}
+          title={t('Live weather data unavailable')}
+          message={current?.message || t('Live weather is temporarily unavailable.')}
           externalSources={[{ name: 'OpenWeatherMap', url: 'https://openweathermap.org' }, { name: 'AccuWeather', url: 'https://www.accuweather.com' }]}
         />
       )}
@@ -71,28 +73,28 @@ export default function Weather() {
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
-                <Stat icon={ThermometerSun} color="text-amber-300" label="Feels like" value={`${Math.round(w.feelsLike)}°C`} />
-                <Stat icon={Droplets} color="text-sky-300" label="Humidity" value={`${w.humidity ?? '—'}%`} />
-                <Stat icon={Wind} color="text-teal-300" label="Wind speed" value={`${w.windSpeed ?? '—'} m/s`} />
-                <Stat icon={Umbrella} color="text-indigo-300" label="Rain" value={w.rain ? `${w.rain} mm` : '0 mm'} />
-                <Stat icon={Gauge} color="text-rose-300" label="Pressure" value={w.pressure != null ? `${w.pressure} hPa` : '—'} />
-                <Stat icon={Eye} color="text-emerald-300" label="Visibility" value={w.visibility != null ? `${(w.visibility / 1000).toFixed(1)} km` : '—'} />
-                <Stat icon={Sunrise} color="text-amber-200" label="Sunrise" value={formatSunTime(w.sunrise, w.timezone)} />
-                <Stat icon={Sunset} color="text-orange-300" label="Sunset" value={formatSunTime(w.sunset, w.timezone)} />
+                <Stat icon={ThermometerSun} color="text-amber-300" label={t('Feels like')} value={`${Math.round(w.feelsLike)}°C`} />
+                <Stat icon={Droplets} color="text-sky-300" label={t('Humidity')} value={`${w.humidity ?? '—'}%`} />
+                <Stat icon={Wind} color="text-teal-300" label={t('Wind speed')} value={`${w.windSpeed ?? '—'} m/s`} />
+                <Stat icon={Umbrella} color="text-indigo-300" label={t('Rain')} value={w.rain ? `${w.rain} mm` : '0 mm'} />
+                <Stat icon={Gauge} color="text-rose-300" label={t('Pressure')} value={w.pressure != null ? `${w.pressure} hPa` : '—'} />
+                <Stat icon={Eye} color="text-emerald-300" label={t('Visibility')} value={w.visibility != null ? `${(w.visibility / 1000).toFixed(1)} km` : '—'} />
+                <Stat icon={Sunrise} color="text-amber-200" label={t('Sunrise')} value={formatSunTime(w.sunrise, w.timezone)} />
+                <Stat icon={Sunset} color="text-orange-300" label={t('Sunset')} value={formatSunTime(w.sunset, w.timezone)} />
               </div>
             </div>
           </div>
 
           {w.alerts?.length > 0 && (
             <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 p-4 dark:border-rose-900 dark:bg-rose-950/40">
-              <p className="font-bold text-rose-700 dark:text-rose-300">⚠ Weather warnings</p>
+              <p className="font-bold text-rose-700 dark:text-rose-300">⚠ {t('Weather warnings')}</p>
               {w.alerts.map((a, i) => (
                 <p key={i} className="mt-1 text-sm text-rose-600 dark:text-rose-400">{a.event}: {a.description}</p>
               ))}
             </div>
           )}
 
-          <h3 className="mb-3 text-base font-extrabold text-slate-900 dark:text-white">7-day forecast</h3>
+          <h3 className="mb-3 text-base font-extrabold text-slate-900 dark:text-white">{t('7-day forecast')}</h3>
           {forecast?.isLive ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
               {forecast.forecast.map((d) => (
@@ -107,7 +109,7 @@ export default function Weather() {
               ))}
             </div>
           ) : (
-            forecast && <p className="text-sm text-slate-500">7-day forecast unavailable: {forecast.message}</p>
+            forecast && <p className="text-sm text-slate-500">{t('7-day forecast unavailable')}: {forecast.message}</p>
           )}
         </>
       )}

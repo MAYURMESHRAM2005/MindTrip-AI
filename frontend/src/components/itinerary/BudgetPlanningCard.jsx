@@ -3,6 +3,7 @@ import { Wallet, PieChart, TrendingUp, PiggyBank, AlertTriangle } from 'lucide-r
 import Card, { CardHeader } from '../ui/Card';
 import Badge from '../ui/Badge';
 import { formatCurrency } from '../../utils/format';
+import { useI18n } from '../../utils/i18n';
 
 const ROW_COLORS = {
   hotel: 'bg-indigo-500',
@@ -34,6 +35,7 @@ function Row({ row, total, currency }) {
 }
 
 export default function BudgetPlanningCard({ planning, currency }) {
+  const { t } = useI18n();
   if (!planning) return null;
   const { rows = [], totalBudget, totalEstimatedCost, remainingBudget, allocatedTotal, optimized, budgetUsedPct, withinBudget } = planning;
   const remaining = remainingBudget ?? totalBudget - totalEstimatedCost;
@@ -45,17 +47,17 @@ export default function BudgetPlanningCard({ planning, currency }) {
     <Card className="mb-6">
       <CardHeader
         icon={PieChart}
-        title="Budget planning"
-        subtitle="How your travel budget is allocated — every cost stays within it"
-        action={<Badge tone={within ? 'green' : 'rose'}>{within ? '✓ In budget' : 'Over budget'}</Badge>}
+        title={t('Budget planning')}
+        subtitle={t('How your travel budget is allocated — every cost stays within it')}
+        action={<Badge tone={within ? 'green' : 'rose'}>{within ? `✓ ${t('In budget')}` : t('Over budget')}</Badge>}
       />
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-900/40">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Total budget</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('Total budget')}</p>
           <p className="mt-1 text-xl font-extrabold text-slate-900 dark:text-white">{formatCurrency(totalBudget, currency)}</p>
         </div>
         <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-900/40">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Estimated trip cost</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('Estimated trip cost')}</p>
           <p className="mt-1 text-xl font-extrabold text-slate-900 dark:text-white">{formatCurrency(totalEstimatedCost, currency)}</p>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-200/70 dark:bg-slate-800">
             <div
@@ -64,16 +66,16 @@ export default function BudgetPlanningCard({ planning, currency }) {
             />
           </div>
           <p className={`mt-1 text-[11px] font-bold ${within ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-            {usedPct}% of budget used
+            {usedPct}% {t('of budget used')}
           </p>
         </div>
         <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-900/40">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Remaining budget</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{t('Remaining budget')}</p>
           <p className={`mt-1 text-xl font-extrabold ${within ? 'text-emerald-500' : 'text-rose-500'}`}>
             {formatCurrency(remaining, currency)}
           </p>
           <p className="mt-1 text-[11px] text-slate-400">
-            {optimized ? `${optimized.dropped?.length || 0} item(s) trimmed · ${formatCurrency(saved, currency)} saved` : 'within your entered budget'}
+            {optimized ? `${optimized.dropped?.length || 0} ${t('item(s) trimmed')} · ${formatCurrency(saved, currency)} ${t('saved')}` : t('within your entered budget')}
           </p>
         </div>
       </div>
@@ -85,17 +87,17 @@ export default function BudgetPlanningCard({ planning, currency }) {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-        <span className="inline-flex items-center gap-1"><Wallet className="h-3.5 w-3.5" /> Allocated: {formatCurrency(allocatedTotal, currency)}</span>
+        <span className="inline-flex items-center gap-1"><Wallet className="h-3.5 w-3.5" /> {t('Allocated')}: {formatCurrency(allocatedTotal, currency)}</span>
         {saved > 0 && (
           <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
-            <TrendingUp className="h-3.5 w-3.5" /> Optimizer saved {formatCurrency(saved, currency)}
+            <TrendingUp className="h-3.5 w-3.5" /> {t('Optimizer saved')} {formatCurrency(saved, currency)}
           </span>
         )}
         {optimized && (
-          <span className="inline-flex items-center gap-1"><PiggyBank className="h-3.5 w-3.5" /> {optimized.notes || 'Budget optimized'}</span>
+          <span className="inline-flex items-center gap-1"><PiggyBank className="h-3.5 w-3.5" /> {optimized.notes || t('Budget optimized')}</span>
         )}
         {!within && (
-          <span className="inline-flex items-center gap-1 font-semibold text-rose-500"><AlertTriangle className="h-3.5 w-3.5" /> Use “Optimize budget” to fit</span>
+          <span className="inline-flex items-center gap-1 font-semibold text-rose-500"><AlertTriangle className="h-3.5 w-3.5" /> {t('Use “Optimize budget” to fit')}</span>
         )}
       </div>
     </Card>

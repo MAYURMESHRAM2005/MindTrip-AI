@@ -7,8 +7,10 @@ import { errorMessage } from '../services/api';
 import { Spinner } from '../components/ui/Spinner';
 import toast from 'react-hot-toast';
 import Badge from '../components/ui/Badge';
+import { useI18n } from '../utils/i18n';
 
 export default function ImageSearch() {
+  const { t } = useI18n();
   const [preview, setPreview] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [result, setResult] = useState(null);
@@ -16,7 +18,7 @@ export default function ImageSearch() {
 
   const handleFile = (file) => {
     if (!file) return;
-    if (!file.type.startsWith('image/')) return toast.error('Please choose an image file');
+    if (!file.type.startsWith('image/')) return toast.error(t('Please choose an image file'));
     const reader = new FileReader();
     reader.onload = () => setPreview(reader.result);
     reader.readAsDataURL(file);
@@ -34,7 +36,7 @@ export default function ImageSearch() {
       setResult(data.data);
       if (!data.data.analysis) toast(data.data.aiMessage, { icon: '🤖' });
     } catch (e) {
-      toast.error(errorMessage(e, 'Image analysis failed'));
+      toast.error(errorMessage(e, t('Image analysis failed')));
     } finally {
       setProcessing(false);
     }
@@ -42,7 +44,7 @@ export default function ImageSearch() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader icon={ImageIcon} title="Image Search" subtitle="Upload a photo — Gemini identifies the place, Geoapify finds real info." />
+      <PageHeader icon={ImageIcon} title={t('Image Search')} subtitle={t('Upload a photo — Gemini identifies the place, Geoapify finds real info.')} />
 
       <div
         className="card flex cursor-pointer flex-col items-center justify-center gap-3 border-2 border-dashed p-10 text-center transition-colors hover:border-brand-400"
@@ -55,8 +57,8 @@ export default function ImageSearch() {
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-500 dark:bg-brand-950">
               <Upload className="h-8 w-8" />
             </div>
-            <p className="font-bold text-slate-700 dark:text-slate-200">Drop a travel photo here or click to upload</p>
-            <p className="text-xs text-slate-400">JPEG, PNG, WEBP · max 8MB</p>
+            <p className="font-bold text-slate-700 dark:text-slate-200">{t('Drop a travel photo here or click to upload')}</p>
+            <p className="text-xs text-slate-400">JPEG, PNG, WEBP · {t('max 8MB')}</p>
           </>
         )}
         <input
@@ -72,22 +74,22 @@ export default function ImageSearch() {
         <div className="mt-4 flex gap-2">
           <button onClick={analyze} disabled={processing} className="btn-primary flex-1">
             {processing ? <Spinner size="sm" /> : <Sparkles className="h-4 w-4" />}
-            {processing ? 'Analyzing with Gemini…' : 'Identify this place'}
+            {processing ? t('Analyzing with Gemini…') : t('Identify this place')}
           </button>
           <button onClick={() => { setPreview(null); setResult(null); }} className="btn-secondary">
-            <X className="h-4 w-4" /> Clear
+            <X className="h-4 w-4" /> {t('Clear')}
           </button>
         </div>
       )}
 
       {result && (
         <div className="mt-6 space-y-4">
-          {!result.aiConfigured && <ProviderNotice title="AI not configured" message={result.aiMessage} />}
+          {!result.aiConfigured && <ProviderNotice title={t('AI not configured')} message={result.aiMessage} />}
 
           {result.analysis && (
             <div className="card p-5">
               <p className="mb-3 flex items-center gap-2 text-sm font-extrabold text-slate-900 dark:text-white">
-                <Sparkles className="h-4 w-4 text-brand-500" /> Gemini analysis
+                <Sparkles className="h-4 w-4 text-brand-500" /> {t('Gemini analysis')}
               </p>
               <div className="flex flex-wrap gap-2">
                 {result.analysis.landmark && <Badge tone="violet">🏛 {result.analysis.landmark}</Badge>}
@@ -101,9 +103,9 @@ export default function ImageSearch() {
 
           <div>
             <p className="mb-3 text-sm font-extrabold text-slate-900 dark:text-white">
-              Possible matches {result.placesLive ? <span className="badge bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">live</span> : ''}
+              {t('Possible matches')} {result.placesLive ? <span className="badge bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">{t('live')}</span> : ''}
             </p>
-            {result.places.length === 0 && !result.placesLive && <ProviderNotice title="Live place data unavailable" message={result.placesMessage} />}
+            {result.places.length === 0 && !result.placesLive && <ProviderNotice title={t('Live place data unavailable')} message={result.placesMessage} />}
             <div className="grid gap-3 sm:grid-cols-2">
               {result.places.map((p, i) => (
                 <div key={p.placeId || i} className="card p-4">

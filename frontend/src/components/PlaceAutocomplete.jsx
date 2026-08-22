@@ -4,6 +4,7 @@ import { MapPin, Loader2 } from 'lucide-react';
 import { mapsApi } from '../services/apiClient';
 import { Field } from './ui/Input';
 import { cn } from '../utils/format';
+import { useI18n } from '../utils/i18n';
 
 /**
  * City / place autocomplete input — "Nag" → suggests "Nagpur".
@@ -32,6 +33,7 @@ export default function PlaceAutocomplete({
   wrapperClassName,
   ...rest
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
   const [debounced, setDebounced] = useState('');
@@ -120,10 +122,10 @@ export default function PlaceAutocomplete({
         >
           {isFetching ? (
             <p className="flex items-center gap-2 px-3.5 py-3 text-xs text-slate-400">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching places…
+              <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('Searching places…')}
             </p>
           ) : suggestions.length === 0 ? (
-            <p className="px-3.5 py-3 text-xs text-slate-400">No matching places. Keep typing or press Enter.</p>
+            <p className="px-3.5 py-3 text-xs text-slate-400">{t('No matching places. Keep typing or press Enter.')}</p>
           ) : (
             <ul>
               {suggestions.map((s, i) => (

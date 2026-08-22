@@ -3,12 +3,14 @@ import { Map as MapIcon, Hotel, UtensilsCrossed, Landmark } from 'lucide-react';
 import Card, { CardHeader } from '../ui/Card';
 import Badge from '../ui/Badge';
 import MapView from '../MapView';
+import { useI18n } from '../../utils/i18n';
 
 /**
  * Interactive map of the trip: hotel, restaurants, attractions markers plus
  * the daily route polylines. Reuses the existing MapView (react-leaflet).
  */
 export default function ItineraryMapCard({ mapData }) {
+  const { t } = useI18n();
   const markers = useMemo(() => {
     if (!mapData?.markers) return [];
     return mapData.markers.filter((m) => m.coordinates?.lat != null && m.coordinates?.lng != null);
@@ -27,8 +29,8 @@ export default function ItineraryMapCard({ mapData }) {
     <Card className="mb-6">
       <CardHeader
         icon={MapIcon}
-        title="Interactive map"
-        subtitle="Hotels, restaurants, attractions and your daily route"
+        title={t('Interactive map')}
+        subtitle={t('Hotels, restaurants, attractions and your daily route')}
         action={
           <div className="flex flex-wrap gap-1.5">
             {count('hotel') > 0 && <Badge tone="violet"><Hotel className="h-3 w-3" /> {count('hotel')}</Badge>}
@@ -45,7 +47,7 @@ export default function ItineraryMapCard({ mapData }) {
         />
       </div>
       {routes.length > 1 && (
-        <p className="mt-2 text-xs text-slate-400">{routes.length} daily route(s) available — showing the first day on the map.</p>
+        <p className="mt-2 text-xs text-slate-400">{routes.length} {t('daily route(s) available — showing the first day on the map.')}</p>
       )}
     </Card>
   );

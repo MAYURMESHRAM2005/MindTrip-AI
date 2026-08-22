@@ -7,6 +7,7 @@ import WeatherSection from './WeatherSection';
 import TravelTipsCard from './TravelTipsCard';
 import RecommendationsCard from './RecommendationsCard';
 import ItineraryMapCard from './ItineraryMapCard';
+import { useI18n } from '../../utils/i18n';
 
 /**
  * Enriched itinerary sections rendered on the AI Itinerary page.
@@ -14,6 +15,7 @@ import ItineraryMapCard from './ItineraryMapCard';
  * generation time — nothing is computed client-side from live APIs.
  */
 export default function ItineraryEnrichment({ extras, currency = 'INR' }) {
+  const { t } = useI18n();
   if (!extras) return null;
 
   return (
@@ -28,7 +30,7 @@ export default function ItineraryEnrichment({ extras, currency = 'INR' }) {
         variant="attraction"
         items={extras.attractions?.top}
         currency={currency}
-        note="Top attractions unavailable right now."
+        note={t('Top attractions unavailable right now.')}
       />
       <ItineraryMapCard mapData={extras.mapData} />
       <RecommendationsCard recommendations={extras.recommendations} />

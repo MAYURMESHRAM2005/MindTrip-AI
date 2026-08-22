@@ -15,7 +15,7 @@ import { cn } from '../utils/format';
 export default function Profile() {
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
-  const { setLang } = useI18n();
+  const { t, setLang } = useI18n();
   const queryClient = useQueryClient();
 
   const { data: prefsData } = useQuery({
@@ -42,7 +42,7 @@ export default function Profile() {
       setUser(data.data.user);
       setLang(data.data.user.language || 'en');
       queryClient.invalidateQueries({ queryKey: ['preferences'] });
-      toast.success('Profile updated');
+      toast.success(t('Profile updated'));
     },
     onError: (e) => toast.error(errorMessage(e)),
   });
@@ -61,7 +61,7 @@ export default function Profile() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <PageHeader icon={User} title="Profile & Travel Preferences" subtitle="These preferences shape every AI trip recommendation." />
+      <PageHeader icon={User} title={t('Profile & Travel Preferences')} subtitle={t('These preferences shape every AI trip recommendation.')} />
 
       <div className="card mb-5 flex items-center gap-4 p-5">
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 text-2xl font-extrabold text-white">
@@ -71,20 +71,20 @@ export default function Profile() {
           <p className="text-lg font-extrabold text-slate-900 dark:text-white">{user?.name}</p>
           <p className="text-sm text-slate-500 dark:text-slate-400">{user?.email}</p>
           <p className="mt-1 inline-flex items-center gap-1 text-xs font-bold text-emerald-500">
-            <CheckCircle2 className="h-3.5 w-3.5" /> {user?.emailVerified ? 'Email verified' : 'Email not verified'}
+            <CheckCircle2 className="h-3.5 w-3.5" /> {user?.emailVerified ? t('Email verified') : t('Email not verified')}
           </p>
         </div>
       </div>
 
       <div className="card space-y-5 p-6">
         <div>
-          <h3 className="mb-3 text-sm font-extrabold text-slate-900 dark:text-white">Basics</h3>
+          <h3 className="mb-3 text-sm font-extrabold text-slate-900 dark:text-white">{t('Basics')}</h3>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Input label="Full name" {...field('name')} />
-            <Input label="Home location" placeholder="Mumbai, India" {...field('homeLocation')} />
-            <Select label="Preferred currency" options={CURRENCIES} {...field('preferredCurrency')} />
+            <Input label={t('Full name')} {...field('name')} />
+            <Input label={t('Home location')} placeholder="Mumbai, India" {...field('homeLocation')} />
+            <Select label={t('Preferred currency')} options={CURRENCIES} {...field('preferredCurrency')} />
             <Select
-              label="Language"
+              label={t('Language')}
               options={LANGUAGES.map((l) => ({ value: l.code, label: l.native }))}
               {...field('language')}
             />
@@ -92,17 +92,17 @@ export default function Profile() {
         </div>
 
         <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
-          <h3 className="mb-3 text-sm font-extrabold text-slate-900 dark:text-white">Travel preferences</h3>
+          <h3 className="mb-3 text-sm font-extrabold text-slate-900 dark:text-white">{t('Travel preferences')}</h3>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Select label="Travel style" options={TRAVEL_STYLES.map((s) => ({ value: s.value, label: s.label }))} {...field('travelStyle')} />
-            <Select label="Food preference" options={['', 'vegetarian', 'vegan', 'non-vegetarian', 'jain', 'halal']} {...field('foodPreference')} />
-            <Select label="Hotel preference" options={['', 'budget', 'boutique', 'luxury', 'hostel', 'resort', 'business']} {...field('hotelPreference')} />
-            <Select label="Transport preference" options={['', 'flight', 'train', 'bus', 'public', 'drive']} {...field('transportPreference')} />
+            <Select label={t('Travel style')} options={TRAVEL_STYLES.map((s) => ({ value: s.value, label: s.label }))} {...field('travelStyle')} />
+            <Select label={t('Food preference')} options={['', 'vegetarian', 'vegan', 'non-vegetarian', 'jain', 'halal']} {...field('foodPreference')} />
+            <Select label={t('Hotel preference')} options={['', 'budget', 'boutique', 'luxury', 'hostel', 'resort', 'business']} {...field('hotelPreference')} />
+            <Select label={t('Transport preference')} options={['', 'flight', 'train', 'bus', 'public', 'drive']} {...field('transportPreference')} />
           </div>
         </div>
 
         <div className="border-t border-slate-100 pt-5 dark:border-slate-800">
-          <h3 className="mb-3 text-sm font-extrabold text-slate-900 dark:text-white">Interests</h3>
+          <h3 className="mb-3 text-sm font-extrabold text-slate-900 dark:text-white">{t('Interests')}</h3>
           <div className="flex flex-wrap gap-2">
             {INTERESTS.map((i) => (
               <button
@@ -122,7 +122,7 @@ export default function Profile() {
         </div>
 
         <Button loading={save.isPending} icon={Save} onClick={() => save.mutate(form)} className="w-full">
-          Save profile
+          {t('Save profile')}
         </Button>
       </div>
     </div>

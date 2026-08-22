@@ -26,7 +26,7 @@ export default function Chatbot() {
   const [sending, setSending] = useState(false);
   const [conversationId, setConversationId] = useState(null);
   const tripId = useTripId();
-  const { lang } = useI18n();
+  const { lang, t } = useI18n();
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -53,7 +53,7 @@ export default function Chatbot() {
         }
       }
       setMessages((m) => [...m, { role: 'assistant', content: reply, meta: data.data.actionExecuted ? { intent: data.data.intent } : null }]);
-      if (data.data.actionExecuted) toast.success('Action applied to your trip!');
+      if (data.data.actionExecuted) toast.success(t('Action applied to your trip!'));
     } catch (e) {
       setMessages((m) => [...m, { role: 'assistant', content: `⚠ ${errorMessage(e)}` }]);
     } finally {
@@ -63,7 +63,7 @@ export default function Chatbot() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader icon={MessageSquare} title="AI Chatbot" subtitle="Contextual assistant that really updates your trip and budget." />
+      <PageHeader icon={MessageSquare} title={t('AI Chatbot')} subtitle={t('Contextual assistant that really updates your trip and budget.')} />
 
       <div className="card flex h-[62vh] flex-col overflow-hidden">
         <div className="flex-1 space-y-4 overflow-y-auto p-5">
@@ -83,7 +83,7 @@ export default function Chatbot() {
               >
                 {m.content}
                 {m.meta?.intent && (
-                  <p className="mt-1.5 text-[10px] font-bold uppercase tracking-wide text-emerald-500">✓ {m.meta.intent} executed</p>
+                  <p className="mt-1.5 text-[10px] font-bold uppercase tracking-wide text-emerald-500">✓ {m.meta.intent} {t('executed')}</p>
                 )}
               </div>
               {m.role === 'user' && (
@@ -118,7 +118,7 @@ export default function Chatbot() {
           <div className="flex items-center gap-2">
             <input
               className="input"
-              placeholder={tripId ? 'Ask about your trip…' : 'Type a message (or plan a trip first for context)…'}
+              placeholder={tripId ? t('Ask about your trip…') : t('Type a message (or plan a trip first for context)…')}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && send()}

@@ -6,8 +6,10 @@ import { AGENTS } from '../constants';
 import { useQuery } from '@tanstack/react-query';
 import { tripApi } from '../services/apiClient';
 import Badge from '../components/ui/Badge';
+import { useI18n } from '../utils/i18n';
 
 export default function Agents() {
+  const { t } = useI18n();
   const [selected, setSelected] = useState(AGENTS[0]);
   const { data: tripsData } = useQuery({
     queryKey: ['trips'],
@@ -19,14 +21,14 @@ export default function Agents() {
     <div>
       <PageHeader
         icon={Bot}
-        title="AI Agents"
-        subtitle="The multi-agent LLM architecture behind every trip you plan."
+        title={t('AI Agents')}
+        subtitle={t('The multi-agent LLM architecture behind every trip you plan.')}
       />
 
       {/* Pipeline flow */}
       <div className="mb-8 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white p-6 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex items-center gap-2 whitespace-nowrap">
-          {['Request', ...AGENTS.filter((a) => a.key !== 'finalValidator').map((a) => a.key), 'Validated Plan'].map((step, i, arr) => (
+          {[t('Request'), ...AGENTS.filter((a) => a.key !== 'finalValidator').map((a) => a.key), t('Validated Plan')].map((step, i, arr) => (
             <Fragment key={step}>
               <motion.div
                 initial={{ opacity: 0, x: 10 }}
@@ -84,19 +86,19 @@ export default function Agents() {
         </div>
         <div className="grid gap-4 text-sm sm:grid-cols-2">
           <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
-            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">Data flow</p>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">{t('Data flow')}</p>
             <p className="text-slate-600 dark:text-slate-300">
               {selected.key === 'orchestrator' || selected.key === 'userPreference' || selected.key === 'destination' || selected.key === 'budget' || selected.key === 'localGuide' || selected.key === 'safety' || selected.key === 'finalValidator' || selected.key === 'translation' || selected.key === 'expense'
-                ? 'Reasoning agent: reads structured context (real provider data where applicable) and produces structured JSON. Falls back to deterministic logic when Gemini is unavailable.'
-                : 'External-data agent: calls the real provider API FIRST, then hands the live data to Gemini for reasoning. Gemini never invents prices, schedules or availability.'}
+                ? t('Reasoning agent: reads structured context (real provider data where applicable) and produces structured JSON. Falls back to deterministic logic when Gemini is unavailable.')
+                : t('External-data agent: calls the real provider API FIRST, then hands the live data to Gemini for reasoning. Gemini never invents prices, schedules or availability.')}
             </p>
           </div>
           <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
-            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">Golden rules</p>
+            <p className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-400">{t('Golden rules')}</p>
             <ul className="space-y-1.5 text-slate-600 dark:text-slate-300">
-              <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" /> Real data first, AI second</li>
-              <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" /> Estimates always flagged</li>
-              <li className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" /> Missing data → “Live data unavailable”</li>
+              <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" /> {t('Real data first, AI second')}</li>
+              <li className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" /> {t('Estimates always flagged')}</li>
+              <li className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" /> {t('Missing data → “Live data unavailable”')}</li>
             </ul>
           </div>
         </div>
@@ -105,7 +107,7 @@ export default function Agents() {
       {/* Last run report */}
       {lastTrip && (
         <div className="card mt-6 p-6">
-          <h3 className="mb-4 text-base font-extrabold text-slate-900 dark:text-white">Last pipeline run — “{lastTrip.title}”</h3>
+          <h3 className="mb-4 text-base font-extrabold text-slate-900 dark:text-white">{t('Last pipeline run')} — “{lastTrip.title}”</h3>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {(lastTrip.agentReport || []).map((r, i) => (
               <div key={i} className="flex items-center gap-2.5 rounded-xl border border-slate-200 px-3 py-2 text-xs dark:border-slate-800">

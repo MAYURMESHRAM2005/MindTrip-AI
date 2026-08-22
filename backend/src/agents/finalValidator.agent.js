@@ -183,15 +183,24 @@ Report any additional realism issues.`,
 
     if (aiResult.status === 'success' && aiResult.data) {
       const ai = aiResult.data;
+      // Overlap detection is exclusively the deterministic check's domain
+      // (duration-aware). The AI review only sees a compressed schedule
+      // summary, so it can hallucinate overlaps (e.g. 19:15 transport vs
+      // 20:00 dinner) that would turn a fine itinerary into a false failure.
+      // Only the deterministic overlap format is suppressed - genuine
+      // qualitative conflicts the AI identifies are still surfaced.
+      const aiIssues = (ai.issues || []).filter(
+        (i) => !/overlaps\s+"/i.test(String(i))
+      );
       return {
         agent: this.name,
         status: ai.passed ? 'success' : 'degraded',
         data: {
           ...deterministic,
           aiReview: ai.summary || '',
-          issues: [...new Set([...deterministic.issues, ...(ai.issues || [])])],
+          issues: [...new Set([...deterministic.issues, ...aiIssues])],
           warnings: [...new Set([...deterministic.warnings, ...(ai.warnings || [])])],
-          passed: deterministic.issues.length === 0 && (ai.issues?.length || 0) === 0,
+          passed: deterministic.issues.length === 0 && aiIssues.length === 0,
         },
         message: 'Validated by Final Validator Agent',
         usedAI: true,

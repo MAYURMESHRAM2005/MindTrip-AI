@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Loader2, Bot } from 'lucide-react';
 import { AGENTS } from '../constants';
+import { useI18n } from '../utils/i18n';
 
 /**
  * Animated multi-agent pipeline. While the backend genuinely runs the agent
@@ -9,6 +10,7 @@ import { AGENTS } from '../constants';
  * agent activate in order. It completes exactly when the request resolves.
  */
 export default function AgentPipeline({ running, onComplete, durationMs = 12000 }) {
+  const { t } = useI18n();
   const [step, setStep] = useState(0);
 
   const pipeline = useMemo(
@@ -48,8 +50,8 @@ export default function AgentPipeline({ running, onComplete, durationMs = 12000 
           <Bot className="h-5 w-5" />
         </div>
         <div>
-          <p className="text-sm font-bold text-slate-900 dark:text-white">Running the multi-agent pipeline</p>
-          <p className="text-xs text-slate-500 dark:text-slate-400">17 specialized agents coordinating your trip…</p>
+          <p className="text-sm font-bold text-slate-900 dark:text-white">{t('Running the multi-agent pipeline')}</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('17 specialized agents coordinating your trip…')}</p>
         </div>
       </div>
       <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">

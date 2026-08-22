@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '../../utils/i18n';
 import { cn } from '../../utils/format';
 
 const TONES = {
@@ -18,11 +19,13 @@ export default function Badge({ tone = 'slate', className, children }) {
  * Data-status pill: live / estimate / unavailable.
  */
 export function DataStatusBadge({ status }) {
-  if (status === 'live') return <Badge tone="green">● Live data</Badge>;
-  if (status === 'estimate') return <Badge tone="amber">≈ Estimate</Badge>;
-  return <Badge tone="rose">Live data unavailable</Badge>;
+  const { t } = useI18n();
+  if (status === 'live') return <Badge tone="green">● {t('Live data')}</Badge>;
+  if (status === 'estimate') return <Badge tone="amber">≈ {t('Estimate')}</Badge>;
+  return <Badge tone="rose">{t('Live data unavailable')}</Badge>;
 }
 
 export function ProviderStatusBadge({ configured }) {
-  return configured ? <Badge tone="green">● Configured</Badge> : <Badge tone="rose">Not configured</Badge>;
+  const { t } = useI18n();
+  return configured ? <Badge tone="green">● {t('Configured')}</Badge> : <Badge tone="rose">{t('Not configured')}</Badge>;
 }

@@ -54,7 +54,7 @@ export default function Sidebar({ open, onClose }) {
                 </div>
                 <div>
                   <p className="text-sm font-extrabold leading-tight text-slate-900 dark:text-white">{APP_NAME}</p>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">Smart Travel</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-brand-600 dark:text-brand-400">{t('Smart Travel')}</p>
                 </div>
               </div>
               <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 lg:hidden">
@@ -68,7 +68,7 @@ export default function Sidebar({ open, onClose }) {
                 if (!items.length) return null;
                 return (
                   <div key={group.section} className="mb-4">
-                    <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">{group.section}</p>
+                    <p className="mb-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">{t(group.section)}</p>
                     <div className="space-y-0.5">
                       {items.map((item) => (
                         <NavLink
@@ -84,9 +84,7 @@ export default function Sidebar({ open, onClose }) {
                           }
                         >
                           <Icon name={item.icon} className="h-[18px] w-[18px]" />
-                          {t(item.label.toLowerCase().replace(/[^a-z]/g, '')) === item.label.toLowerCase().replace(/[^a-z]/g, '')
-                            ? item.label
-                            : t(item.label.toLowerCase().replace(/[^a-z]/g, ''))}
+                          {t(item.label)}
                         </NavLink>
                       ))}
                     </div>
@@ -105,7 +103,7 @@ export default function Sidebar({ open, onClose }) {
                   )}
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{user?.name || 'Traveler'}</p>
+                  <p className="truncate text-sm font-bold text-slate-900 dark:text-white">{user?.name || t('Traveler')}</p>
                   <p className="truncate text-xs text-slate-500 dark:text-slate-400">{user?.email}</p>
                 </div>
               </div>

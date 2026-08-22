@@ -11,15 +11,17 @@ import toast from 'react-hot-toast';
 import { errorMessage } from '../services/api';
 import { PageLoader } from '../components/ui/Spinner';
 import { mapsApi } from '../services/apiClient';
+import { useI18n } from '../utils/i18n';
 
 const CATEGORY_META = {
-  hospitals: { icon: Hospital, label: 'Hospitals', color: 'text-rose-500 bg-rose-50 dark:bg-rose-950' },
-  police: { icon: Shield, label: 'Police', color: 'text-blue-500 bg-blue-50 dark:bg-blue-950' },
-  pharmacies: { icon: Pill, label: 'Pharmacies', color: 'text-violet-500 bg-violet-50 dark:bg-violet-950' },
-  embassies: { icon: Globe, label: 'Embassies & consulates', color: 'text-teal-500 bg-teal-50 dark:bg-teal-950' },
+  hospitals: { icon: Hospital, labelKey: 'Hospitals', color: 'text-rose-500 bg-rose-50 dark:bg-rose-950' },
+  police: { icon: Shield, labelKey: 'Police', color: 'text-blue-500 bg-blue-50 dark:bg-blue-950' },
+  pharmacies: { icon: Pill, labelKey: 'Pharmacies', color: 'text-violet-500 bg-violet-50 dark:bg-violet-950' },
+  embassies: { icon: Globe, labelKey: 'Embassies & consulates', color: 'text-teal-500 bg-teal-50 dark:bg-teal-950' },
 };
 
 export default function Emergency() {
+  const { t } = useI18n();
   const [location, setLocation] = useState(null);
   const [locating, setLocating] = useState(false);
   const [contactModal, setContactModal] = useState(false);
@@ -50,7 +52,7 @@ export default function Emergency() {
   const addContact = useMutation({
     mutationFn: (payload) => emergencyApi.addContact(payload),
     onSuccess: () => {
-      toast.success('Contact saved');
+      toast.success(t('Contact saved'));
       setContactModal(false);
       setForm({ name: '', relationship: '', phone: '', email: '', isPrimary: false });
       queryClient.invalidateQueries({ queryKey: ['emergency-contacts'] });
@@ -70,49 +72,49 @@ export default function Emergency() {
       const route = data.data.directions?.routes?.[0];
       toast(
         route
-          ? `${name}: ${route.distanceKm} km, ~${route.durationMin} min ${data.data.isLive ? '(live)' : '(estimate)'}`
-          : `No route available to ${name}`,
+          ? `${name}: ${route.distanceKm} km, ~${route.durationMin} min ${data.data.isLive ? `(${t('live')})` : `(${t('estimate')})`}`
+          : `${t('No route available to')} ${name}`,
         { icon: '🧭' }
       );
     } catch {
-      toast.error('Directions unavailable');
+      toast.error(t('Directions unavailable'));
     }
   };
 
-  if (locating) return <PageLoader label="Finding your location…" />;
+  if (locating) return <PageLoader label={t('Finding your location…')} />;
 
   return (
     <div>
-      <PageHeader icon={Siren} title="Emergency Center" subtitle="Nearby hospitals, police, pharmacies and embassies from live data." />
+      <PageHeader icon={Siren} title={t('Emergency Center')} subtitle={t('Nearby hospitals, police, pharmacies and embassies from live data.')} />
 
       {/* Universal emergency number - factual global reference, clearly not fabricated per-country numbers */}
       <div className="mb-6 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-800 to-slate-900 p-5 text-white dark:border-slate-700">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-bold">In an emergency, call your local emergency number</p>
+            <p className="text-sm font-bold">{t('In an emergency, call your local emergency number')}</p>
             <p className="mt-0.5 text-xs text-slate-300">
-              112 works in many countries (EU, India, UK and others). Check the local country's official emergency numbers — we never fabricate them.
+              {t("112 works in many countries (EU, India, UK and others). Check the local country's official emergency numbers — we never fabricate them.")}
             </p>
           </div>
-          <a href="tel:112" className="btn bg-white text-slate-900 hover:bg-slate-100">📞 Call 112</a>
+          <a href="tel:112" className="btn bg-white text-slate-900 hover:bg-slate-100">📞 {t('Call 112')}</a>
         </div>
       </div>
 
       {!location && (
-        <ProviderNotice title="Location unavailable" message="Allow location access to see nearby emergency services. You can also search below." />
+        <ProviderNotice title={t('Location unavailable')} message={t('Allow location access to see nearby emergency services. You can also search below.')} />
       )}
 
       {location && !nearbyLoading && nearbyData && !nearbyData.isLive && (
         <ProviderNotice
-          title="Live data unavailable for emergency services"
-          message={nearbyData._apiMessage || 'Live emergency services are temporarily unavailable. Your contacts below still work.'}
+          title={t('Live data unavailable for emergency services')}
+          message={nearbyData._apiMessage || t('Live emergency services are temporarily unavailable. Your contacts below still work.')}
         />
       )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Nearby services */}
         <div>
-          <h3 className="mb-3 text-base font-extrabold text-slate-900 dark:text-white">Nearby services</h3>
+          <h3 className="mb-3 text-base font-extrabold text-slate-900 dark:text-white">{t('Nearby services')}</h3>
           <div className="space-y-4">
             {Object.entries(CATEGORY_META).map(([key, meta]) => {
               const places = nearbyData?.results?.[key] || [];
@@ -122,11 +124,11 @@ export default function Emergency() {
                     <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${meta.color}`}>
                       <meta.icon className="h-4 w-4" />
                     </span>
-                    <p className="text-sm font-extrabold text-slate-900 dark:text-white">{meta.label}</p>
-                    <span className="ml-auto text-xs text-slate-400">{places.length} found</span>
+                    <p className="text-sm font-extrabold text-slate-900 dark:text-white">{t(meta.labelKey)}</p>
+                    <span className="ml-auto text-xs text-slate-400">{places.length} {t('found')}</span>
                   </div>
                   {places.length === 0 ? (
-                    <p className="text-xs text-slate-400">Live data unavailable for this category.</p>
+                    <p className="text-xs text-slate-400">{t('Live data unavailable for this category.')}</p>
                   ) : (
                     <div className="space-y-1.5">
                       {places.map((p, i) => (
@@ -140,7 +142,7 @@ export default function Emergency() {
                             onClick={() => directionsTo(p.name, p.coordinates)}
                             className="btn-secondary shrink-0 px-2.5 py-1 text-xs"
                           >
-                            <MapPin className="h-3 w-3" /> Route
+                            <MapPin className="h-3 w-3" /> {t('Route')}
                           </button>
                         </div>
                       ))}
@@ -155,15 +157,15 @@ export default function Emergency() {
         {/* Personal contacts */}
         <div>
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-base font-extrabold text-slate-900 dark:text-white">My emergency contacts</h3>
-            <Button size="sm" icon={Plus} onClick={() => setContactModal(true)}>Add</Button>
+            <h3 className="text-base font-extrabold text-slate-900 dark:text-white">{t('My emergency contacts')}</h3>
+            <Button size="sm" icon={Plus} onClick={() => setContactModal(true)}>{t('Add')}</Button>
           </div>
           {contactsLoading ? (
-            <PageLoader label="Loading contacts…" />
+            <PageLoader label={t('Loading contacts…')} />
           ) : (
             <div className="space-y-2">
               {(contactsData?.contacts || []).length === 0 && (
-                <div className="card p-6 text-center text-sm text-slate-400">Save family or friends as emergency contacts.</div>
+                <div className="card p-6 text-center text-sm text-slate-400">{t('Save family or friends as emergency contacts.')}</div>
               )}
               {(contactsData?.contacts || []).map((c) => (
                 <div key={c._id} className="card flex items-center gap-3 p-4">
@@ -172,7 +174,7 @@ export default function Emergency() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-bold text-slate-900 dark:text-white">
-                      {c.name} {c.isPrimary && <span className="badge bg-brand-50 text-brand-600 dark:bg-brand-950 dark:text-brand-300">primary</span>}
+                      {c.name} {c.isPrimary && <span className="badge bg-brand-50 text-brand-600 dark:bg-brand-950 dark:text-brand-300">{t('primary')}</span>}
                     </p>
                     <p className="text-xs text-slate-400">{c.relationship}{c.email ? ` · ${c.email}` : ''}</p>
                   </div>
@@ -188,29 +190,29 @@ export default function Emergency() {
           )}
 
           <div className="card mt-4 p-4">
-            <p className="text-sm font-extrabold text-slate-900 dark:text-white">Emergency essentials</p>
+            <p className="text-sm font-extrabold text-slate-900 dark:text-white">{t('Emergency essentials')}</p>
             <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-slate-500 dark:text-slate-400">
-              <li>Keep your hotel address and passport copies saved</li>
-              <li>Share your live location with someone you trust</li>
-              <li>Travel insurance with medical cover is strongly advised</li>
-              <li>Save local embassy/consulate contact from official sources</li>
+              <li>{t('Keep your hotel address and passport copies saved')}</li>
+              <li>{t('Share your live location with someone you trust')}</li>
+              <li>{t('Travel insurance with medical cover is strongly advised')}</li>
+              <li>{t('Save local embassy/consulate contact from official sources')}</li>
             </ul>
           </div>
         </div>
       </div>
 
-      <Modal open={contactModal} onClose={() => setContactModal(false)} title="Add emergency contact">
+      <Modal open={contactModal} onClose={() => setContactModal(false)} title={t('Add emergency contact')}>
         <div className="space-y-4">
-          <Input label="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <Input label="Relationship" placeholder="Family / Friend" value={form.relationship} onChange={(e) => setForm({ ...form, relationship: e.target.value })} />
-          <Input label="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-          <Input label="Email (optional)" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <Input label={t('Name')} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <Input label={t('Relationship')} placeholder="Family / Friend" value={form.relationship} onChange={(e) => setForm({ ...form, relationship: e.target.value })} />
+          <Input label={t('Phone')} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <Input label={t('Email (optional)')} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
           <label className="flex items-center gap-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
             <input type="checkbox" checked={form.isPrimary} onChange={(e) => setForm({ ...form, isPrimary: e.target.checked })} className="h-4 w-4 accent-brand-600" />
-            Set as primary contact
+            {t('Set as primary contact')}
           </label>
           <Button className="w-full" disabled={!form.name || !form.phone} onClick={() => addContact.mutate(form)}>
-            Save contact
+            {t('Save contact')}
           </Button>
         </div>
       </Modal>

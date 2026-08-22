@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { DataStatusBadge } from './ui/Badge';
 import { formatCurrency, formatDateShort } from '../utils/format';
+import { useI18n } from '../utils/i18n';
 
 const CATEGORY_ICON = {
   flight: Plane, train: TrainFront, bus: Bus, hotel: Hotel, restaurant: UtensilsCrossed,
@@ -24,6 +25,7 @@ const CATEGORY_COLOR = {
 };
 
 function ActivityRow({ activity, currency }) {
+  const { t } = useI18n();
   const Icon = CATEGORY_ICON[activity.category] || Activity;
   const color = CATEGORY_COLOR[activity.category] || CATEGORY_COLOR.transport;
   return (
@@ -58,12 +60,12 @@ function ActivityRow({ activity, currency }) {
                 <Navigation className="h-3 w-3" />
                 {activity.travel.distanceKm > 0 && `${activity.travel.distanceKm} km · `}
                 {activity.travel.durationMin} min {activity.travel.method}
-                {activity.travel.isEstimate && ' (est.)'}
+                {activity.travel.isEstimate && ` (${t('est.')})`}
               </span>
             )}
             {activity.bookingUrl && (
               <a href={activity.bookingUrl} target="_blank" rel="noreferrer" className="font-semibold text-brand-600 hover:underline dark:text-brand-400">
-                Book / source
+                {t('Book / source')}
               </a>
             )}
           </div>
@@ -74,58 +76,61 @@ function ActivityRow({ activity, currency }) {
           {activity.cost?.amount ? formatCurrency(activity.cost.amount, currency) : '—'}
         </p>
         {activity.cost?.isEstimate && activity.cost?.amount > 0 && (
-          <p className="text-[10px] font-medium uppercase tracking-wide text-amber-500">estimate</p>
+          <p className="text-[10px] font-medium uppercase tracking-wide text-amber-500">{t('estimate')}</p>
         )}
         {activity.cost?.perPerson > 0 && (
-          <p className="text-[10px] text-slate-400">≈ {formatCurrency(activity.cost.perPerson, currency)}/person</p>
+          <p className="text-[10px] text-slate-400">≈ {formatCurrency(activity.cost.perPerson, currency)}{t('/person')}</p>
         )}
       </div>
     </motion.div>
   );
 }
 
-const BREAKDOWN_ROWS = [
-  ['accommodation', 'Accommodation'],
-  ['breakfast', 'Breakfast'],
-  ['lunch', 'Lunch'],
-  ['dinner', 'Dinner'],
-  ['transport', 'Transport'],
-  ['activities', 'Activities'],
-  ['evening', 'Evening'],
-  ['night', 'Night activity'],
-];
+const BREAKDOWN_KEYS = ['accommodation', 'breakfast', 'lunch', 'dinner', 'transport', 'activities', 'evening', 'night'];
+
+const BREAKDOWN_LABEL_KEY = {
+  accommodation: 'Accommodation',
+  breakfast: 'Breakfast',
+  lunch: 'Lunch',
+  dinner: 'Dinner',
+  transport: 'Transport',
+  activities: 'Activities',
+  evening: 'Evening',
+  night: 'Night activity',
+};
 
 function DayCostBreakdown({ breakdown, currency }) {
+  const { t } = useI18n();
   if (!breakdown || typeof breakdown.dayTotal !== 'number') return null;
-  const rows = BREAKDOWN_ROWS.filter(([k]) => breakdown[k] > 0);
+  const rows = BREAKDOWN_KEYS.filter((k) => breakdown[k] > 0);
   return (
     <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-4 dark:border-slate-800 dark:bg-slate-900/40">
       <p className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-        <Wallet className="h-3.5 w-3.5" /> Day cost breakdown
+        <Wallet className="h-3.5 w-3.5" /> {t('Day cost breakdown')}
       </p>
       <div className="mt-2.5 grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3">
-        {rows.map(([k, label]) => (
+        {rows.map((k) => (
           <div key={k} className="flex items-baseline justify-between gap-2 text-xs">
-            <span className="text-slate-500 dark:text-slate-400">{label}</span>
+            <span className="text-slate-500 dark:text-slate-400">{t(BREAKDOWN_LABEL_KEY[k])}</span>
             <span className="font-bold text-slate-800 dark:text-slate-100">{formatCurrency(breakdown[k], currency)}</span>
           </div>
         ))}
       </div>
       <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-200/70 pt-3 dark:border-slate-700/70 sm:grid-cols-4">
         <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-400">Day total</p>
+          <p className="text-[10px] font-semibold uppercase text-slate-400">{t('Day total')}</p>
           <p className="text-sm font-extrabold text-slate-900 dark:text-white">{formatCurrency(breakdown.dayTotal, currency)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-400">Per person</p>
+          <p className="text-[10px] font-semibold uppercase text-slate-400">{t('Per person')}</p>
           <p className="text-sm font-extrabold text-slate-900 dark:text-white">{formatCurrency(breakdown.perPerson, currency)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-400">Cumulative</p>
+          <p className="text-[10px] font-semibold uppercase text-slate-400">{t('Cumulative')}</p>
           <p className="text-sm font-extrabold text-slate-900 dark:text-white">{formatCurrency(breakdown.cumulative, currency)}</p>
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-400">Remaining budget</p>
+          <p className="text-[10px] font-semibold uppercase text-slate-400">{t('Remaining budget')}</p>
           <p className={`text-sm font-extrabold ${breakdown.remainingBudget >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
             {formatCurrency(breakdown.remainingBudget, currency)}
           </p>
@@ -136,11 +141,12 @@ function DayCostBreakdown({ breakdown, currency }) {
 }
 
 export default function ItineraryTimeline({ days = [], currency = 'INR' }) {
+  const { t } = useI18n();
   if (!days.length) {
     return (
       <div className="flex items-center gap-3 rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500 dark:border-slate-700">
         <AlertTriangle className="h-5 w-5 text-amber-500" />
-        No itinerary generated yet.
+        {t('No itinerary generated yet.')}
       </div>
     );
   }
@@ -156,7 +162,7 @@ export default function ItineraryTimeline({ days = [], currency = 'INR' }) {
               </span>
               <div>
                 <p className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
-                  Day {day.dayNumber}
+                  {t('Day')} {day.dayNumber}
                   {day.area && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-700 dark:bg-brand-950 dark:text-brand-300">
                       <Map className="h-3 w-3" /> {day.area}
@@ -173,7 +179,7 @@ export default function ItineraryTimeline({ days = [], currency = 'INR' }) {
                   {day.weather.tempMax != null && `${Math.round(day.weather.tempMax)}°C `}
                   {day.weather.condition}
                   {day.weather.rainProbability > 40 && ` 🌧 ${day.weather.rainProbability}%`}
-                  {day.weather.indoorPlan && ' · 🏠 indoor'}
+                  {day.weather.indoorPlan && ` · 🏠 ${t('indoor')}`}
                 </span>
               )}
               <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
@@ -186,20 +192,20 @@ export default function ItineraryTimeline({ days = [], currency = 'INR' }) {
           {day.overnight && (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 bg-indigo-50/50 px-5 py-2.5 text-xs dark:border-slate-800 dark:bg-indigo-950/20">
               <span className="inline-flex items-center gap-1.5 font-bold text-indigo-700 dark:text-indigo-300">
-                <Moon className="h-3.5 w-3.5" /> Overnight: {day.overnight.name}
+                <Moon className="h-3.5 w-3.5" /> {t('Overnight')}: {day.overnight.name}
               </span>
               {day.overnight.area && <span className="text-slate-500 dark:text-slate-400">· {day.overnight.area}</span>}
               {day.overnight.pricePerRoomNight > 0 && (
                 <span className="text-slate-500 dark:text-slate-400">
-                  · {formatCurrency(day.overnight.pricePerRoomNight, currency)}/room/night × {day.overnight.rooms} room(s)
-                  {day.overnight.nights > 0 ? ` × ${day.overnight.nights} night(s)` : ''} ={' '}
+                  · {formatCurrency(day.overnight.pricePerRoomNight, currency)}{t('/room/night')} × {day.overnight.rooms} {t('room(s)')}
+                  {day.overnight.nights > 0 ? ` × ${day.overnight.nights} ${t('night(s)')}` : ''} ={' '}
                   <b className="text-slate-800 dark:text-slate-100">{formatCurrency(day.overnight.total, currency)}</b>
                 </span>
               )}
               {day.overnight.isLive ? (
-                <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">live</span>
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">{t('live')}</span>
               ) : (
-                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300">estimated</span>
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300">{t('estimated')}</span>
               )}
             </div>
           )}

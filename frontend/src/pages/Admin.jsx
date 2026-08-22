@@ -11,10 +11,12 @@ import { PageLoader } from '../components/ui/Spinner';
 import Badge, { ProviderStatusBadge } from '../components/ui/Badge';
 import toast from 'react-hot-toast';
 import { timeAgo, formatCurrency } from '../utils/format';
+import { useI18n } from '../utils/i18n';
 
 const TABS = ['Overview', 'Users', 'Trips', 'AI Usage', 'Providers', 'Errors'];
 
 export default function Admin() {
+  const { t } = useI18n();
   const [tab, setTab] = useState('Overview');
   const queryClient = useQueryClient();
 
@@ -29,7 +31,7 @@ export default function Admin() {
   const updateUser = useMutation({
     mutationFn: ({ id, payload }) => adminApi.updateUser(id, payload),
     onSuccess: () => {
-      toast.success('User updated');
+      toast.success(t('User updated'));
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
     },
     onError: (e) => toast.error(e.response?.data?.message || e.message),
@@ -41,16 +43,16 @@ export default function Admin() {
 
   return (
     <div>
-      <PageHeader icon={Shield} title="Admin Dashboard" subtitle="Role-based admin console — protected by RBAC." />
+      <PageHeader icon={Shield} title={t('Admin Dashboard')} subtitle={t('Role-based admin console — protected by RBAC.')} />
 
       <div className="mb-6 flex gap-1 overflow-x-auto">
-        {TABS.map((t) => (
+        {TABS.map((tabKey, i) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-bold transition-all ${tab === t ? 'bg-brand-600 text-white shadow-card' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'}`}
+            key={tabKey}
+            onClick={() => setTab(tabKey)}
+            className={`whitespace-nowrap rounded-xl px-4 py-2 text-sm font-bold transition-all ${tab === tabKey ? 'bg-brand-600 text-white shadow-card' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'}`}
           >
-            {t}
+            {t(tabKey)}
           </button>
         ))}
       </div>
@@ -58,17 +60,17 @@ export default function Admin() {
       {tab === 'Overview' && (
         <>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard icon={Users} label="Users" value={stats.users} tone="blue" />
-            <StatCard icon={Plane} label="Trips" value={stats.trips} tone="green" />
-            <StatCard icon={Bot} label="AI calls" value={stats.aiCalls} tone="violet" />
-            <StatCard icon={AlertTriangle} label="Total expenses" value={formatCurrency(stats.totalExpenses)} tone="amber" />
+            <StatCard icon={Users} label={t('Users')} value={stats.users} tone="blue" />
+            <StatCard icon={Plane} label={t('Trips')} value={stats.trips} tone="green" />
+            <StatCard icon={Bot} label={t('AI calls')} value={stats.aiCalls} tone="violet" />
+            <StatCard icon={AlertTriangle} label={t('Total expenses')} value={formatCurrency(stats.totalExpenses)} tone="amber" />
           </div>
           <div className="card mt-6 p-5">
             <h3 className="mb-4 flex items-center gap-2 text-sm font-extrabold text-slate-900 dark:text-white">
-              <Activity className="h-4 w-4 text-brand-500" /> New signups (last 60 days)
+              <Activity className="h-4 w-4 text-brand-500" /> {t('New signups (last 60 days)')}
             </h3>
             {chartData.length === 0 ? (
-              <p className="py-8 text-center text-sm text-slate-400">No signup data yet.</p>
+              <p className="py-8 text-center text-sm text-slate-400">{t('No signup data yet.')}</p>
             ) : (
               <ResponsiveContainer width="100%" height={260}>
                 <BarChart data={chartData}>
@@ -82,13 +84,13 @@ export default function Admin() {
             )}
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
-                <p className="text-xs font-bold uppercase text-slate-400">Top destinations</p>
+                <p className="text-xs font-bold uppercase text-slate-400">{t('Top destinations')}</p>
                 {(analyticsData?.tripsByDestination || []).slice(0, 5).map((d) => (
-                  <p key={d._id} className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">{d._id} · {d.count} trips</p>
+                  <p key={d._id} className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">{d._id} · {d.count} {t('trips')}</p>
                 ))}
               </div>
               <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
-                <p className="text-xs font-bold uppercase text-slate-400">Trips by status</p>
+                <p className="text-xs font-bold uppercase text-slate-400">{t('Trips by status')}</p>
                 {(analyticsData?.tripsByStatus || []).map((s) => (
                   <p key={s._id} className="mt-1 text-sm font-semibold text-slate-700 dark:text-slate-200">{s._id} · {s.count}</p>
                 ))}
@@ -103,12 +105,12 @@ export default function Admin() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase text-slate-400 dark:border-slate-800">
-                <th className="py-2 pr-4">Name</th>
-                <th className="py-2 pr-4">Email</th>
-                <th className="py-2 pr-4">Role</th>
-                <th className="py-2 pr-4">Verified</th>
-                <th className="py-2 pr-4">Joined</th>
-                <th className="py-2">Actions</th>
+                <th className="py-2 pr-4">{t('Name')}</th>
+                <th className="py-2 pr-4">{t('Email')}</th>
+                <th className="py-2 pr-4">{t('Role')}</th>
+                <th className="py-2 pr-4">{t('Verified')}</th>
+                <th className="py-2 pr-4">{t('Joined')}</th>
+                <th className="py-2">{t('Actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -133,7 +135,7 @@ export default function Admin() {
                       onClick={() => updateUser.mutate({ id: u._id, payload: { emailVerified: !u.emailVerified } })}
                       className="btn-secondary px-2.5 py-1 text-xs"
                     >
-                      Toggle verify
+                      {t('Toggle verify')}
                     </button>
                   </td>
                 </tr>
@@ -148,23 +150,23 @@ export default function Admin() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase text-slate-400 dark:border-slate-800">
-                <th className="py-2 pr-4">Title</th>
-                <th className="py-2 pr-4">User</th>
-                <th className="py-2 pr-4">Destination</th>
-                <th className="py-2 pr-4">Budget</th>
-                <th className="py-2 pr-4">Estimated</th>
-                <th className="py-2">Status</th>
+                <th className="py-2 pr-4">{t('Title')}</th>
+                <th className="py-2 pr-4">{t('User')}</th>
+                <th className="py-2 pr-4">{t('Destination')}</th>
+                <th className="py-2 pr-4">{t('Budget')}</th>
+                <th className="py-2 pr-4">{t('Estimated')}</th>
+                <th className="py-2">{t('Status')}</th>
               </tr>
             </thead>
             <tbody>
-              {(tripsData?.trips || []).map((t) => (
-                <tr key={t._id} className="border-b border-slate-50 dark:border-slate-800/60">
-                  <td className="py-2.5 pr-4 font-bold text-slate-900 dark:text-white">{t.title}</td>
-                  <td className="py-2.5 pr-4 text-slate-500">{t.user?.email || '—'}</td>
-                  <td className="py-2.5 pr-4">{t.destination}</td>
-                  <td className="py-2.5 pr-4">{formatCurrency(t.budget.total, t.budget.currency)}</td>
-                  <td className="py-2.5 pr-4">{formatCurrency(t.totalEstimatedCost, t.budget.currency)}</td>
-                  <td className="py-2.5"><Badge tone={t.isOverBudget ? 'rose' : 'green'}>{t.isOverBudget ? 'over budget' : t.status}</Badge></td>
+              {(tripsData?.trips || []).map((trip) => (
+                <tr key={trip._id} className="border-b border-slate-50 dark:border-slate-800/60">
+                  <td className="py-2.5 pr-4 font-bold text-slate-900 dark:text-white">{trip.title}</td>
+                  <td className="py-2.5 pr-4 text-slate-500">{trip.user?.email || '—'}</td>
+                  <td className="py-2.5 pr-4">{trip.destination}</td>
+                  <td className="py-2.5 pr-4">{formatCurrency(trip.budget.total, trip.budget.currency)}</td>
+                  <td className="py-2.5 pr-4">{formatCurrency(trip.totalEstimatedCost, trip.budget.currency)}</td>
+                  <td className="py-2.5"><Badge tone={trip.isOverBudget ? 'rose' : 'green'}>{trip.isOverBudget ? t('over budget') : trip.status}</Badge></td>
                 </tr>
               ))}
             </tbody>
@@ -176,7 +178,7 @@ export default function Admin() {
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="card p-5">
             <p className="text-3xl font-extrabold text-slate-900 dark:text-white">{aiData.summary.total}</p>
-            <p className="text-xs font-semibold uppercase text-slate-400">AI calls in last 30 days</p>
+            <p className="text-xs font-semibold uppercase text-slate-400">{t('AI calls in last 30 days')}</p>
             <div className="mt-4 space-y-1.5">
               {aiData.summary.byAgent.map((a) => (
                 <div key={a._id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-sm dark:bg-slate-800/60">
@@ -187,14 +189,14 @@ export default function Admin() {
             </div>
           </div>
           <div className="card p-5">
-            <p className="mb-2 text-xs font-bold uppercase text-slate-400">Status breakdown</p>
+            <p className="mb-2 text-xs font-bold uppercase text-slate-400">{t('Status breakdown')}</p>
             {aiData.summary.byStatus.map((s) => (
               <div key={s._id} className="mb-2 flex items-center justify-between rounded-lg px-3 py-2">
                 <Badge tone={s._id === 'success' ? 'green' : s._id === 'error' ? 'rose' : 'amber'}>{s._id}</Badge>
                 <span className="font-bold">{s.count}</span>
               </div>
             ))}
-            <p className="mt-3 text-xs text-slate-400">Daily latency avg available in logs.</p>
+            <p className="mt-3 text-xs text-slate-400">{t('Daily latency avg available in logs.')}</p>
           </div>
         </div>
       )}
@@ -204,9 +206,9 @@ export default function Admin() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-slate-100 text-xs uppercase text-slate-400 dark:border-slate-800">
-                <th className="py-2 pr-4">Provider</th>
-                <th className="py-2 pr-4">Kind</th>
-                <th className="py-2">Status</th>
+                <th className="py-2 pr-4">{t('Provider')}</th>
+                <th className="py-2 pr-4">{t('Kind')}</th>
+                <th className="py-2">{t('Status')}</th>
               </tr>
             </thead>
             <tbody>
@@ -228,7 +230,7 @@ export default function Admin() {
       {tab === 'Errors' && (
         <div className="card p-5">
           {(errorsData?.errors || []).length === 0 ? (
-            <p className="py-10 text-center text-sm text-slate-400">No provider errors in the last 7 days 🎉</p>
+            <p className="py-10 text-center text-sm text-slate-400">{t('No provider errors in the last 7 days')} 🎉</p>
           ) : (
             <div className="space-y-2">
               {errorsData.errors.map((e, i) => (

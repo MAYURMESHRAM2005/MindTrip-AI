@@ -10,6 +10,7 @@ import { flightsApi } from '../services/apiClient';
 import { formatCurrency, todayISO } from '../utils/format';
 import { Spinner } from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
+import { useI18n } from '../utils/i18n';
 
 function flightsFromQuery() {
   const sp = new URLSearchParams(window.location.search);
@@ -26,6 +27,7 @@ function flightsFromQuery() {
 }
 
 export default function Flights() {
+  const { t } = useI18n();
   const [params, setParams] = useState(flightsFromQuery);
   // Topbar search (?to=Goa) should auto-run the search on mount.
   const [search, setSearch] = useState(() => {
@@ -46,22 +48,22 @@ export default function Flights() {
 
   return (
     <div>
-      <PageHeader icon={Plane} title="Flights" subtitle="Live flight data from AviationStack." />
+      <PageHeader icon={Plane} title={t('Flights')} subtitle={t('Live flight data from AviationStack.')} />
 
       <div className="card mb-6 p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <PlaceAutocomplete label="From" placeholder="Mumbai, Delhi…" value={params.origin} onChange={(v) => setParams({ ...params, origin: v })} />
-          <PlaceAutocomplete label="To" placeholder="Goa, Pune…" value={params.destination} onChange={(v) => setParams({ ...params, destination: v })} />
-          <Input label="Departure" type="date" min={todayISO()} value={params.departDate} onChange={(e) => setParams({ ...params, departDate: e.target.value })} />
-          <Input label="Return (optional)" type="date" min={params.departDate || todayISO()} value={params.returnDate} onChange={(e) => setParams({ ...params, returnDate: e.target.value })} />
-          <Input label="Passengers" type="number" min={1} max={9} value={params.adults} onChange={(e) => setParams({ ...params, adults: Number(e.target.value) || 1 })} />
-          <Select label="Class" value={params.travelClass} onChange={(e) => setParams({ ...params, travelClass: e.target.value })} options={['ECONOMY', 'PREMIUM_ECONOMY', 'BUSINESS', 'FIRST']} />
+          <PlaceAutocomplete label={t('From')} placeholder="Mumbai, Delhi…" value={params.origin} onChange={(v) => setParams({ ...params, origin: v })} />
+          <PlaceAutocomplete label={t('To')} placeholder="Goa, Pune…" value={params.destination} onChange={(v) => setParams({ ...params, destination: v })} />
+          <Input label={t('Departure')} type="date" min={todayISO()} value={params.departDate} onChange={(e) => setParams({ ...params, departDate: e.target.value })} />
+          <Input label={t('Return (optional)')} type="date" min={params.departDate || todayISO()} value={params.returnDate} onChange={(e) => setParams({ ...params, returnDate: e.target.value })} />
+          <Input label={t('Passengers')} type="number" min={1} max={9} value={params.adults} onChange={(e) => setParams({ ...params, adults: Number(e.target.value) || 1 })} />
+          <Select label={t('Class')} value={params.travelClass} onChange={(e) => setParams({ ...params, travelClass: e.target.value })} options={['ECONOMY', 'PREMIUM_ECONOMY', 'BUSINESS', 'FIRST']} />
           <label className="flex items-end gap-2 pb-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
             <input type="checkbox" checked={params.nonStop} onChange={(e) => setParams({ ...params, nonStop: e.target.checked })} className="h-4 w-4 accent-brand-600" />
-            Non-stop only
+            {t('Non-stop only')}
           </label>
           <Button onClick={doSearch} icon={Search} className="self-end">
-            Search flights
+            {t('Search flights')}
           </Button>
         </div>
       </div>
@@ -70,8 +72,8 @@ export default function Flights() {
 
       {data && !data.isLive && (
         <ProviderNotice
-          title="Live flight data unavailable"
-          message={data.message || 'AviationStack is not returning live data. Check that AVIATIONSTACK_API_KEY is set in backend/.env and that your AviationStack plan quota has not been reached.'}
+          title={t('Live flight data unavailable')}
+          message={data.message || t('AviationStack is not returning live data. Check that AVIATIONSTACK_API_KEY is set in backend/.env and that your AviationStack plan quota has not been reached.')}
           externalSources={[{ name: 'Google Flights', url: 'https://www.google.com/travel/flights' }, { name: 'Skyscanner', url: 'https://www.skyscanner.net' }]}
         />
       )}
@@ -79,13 +81,13 @@ export default function Flights() {
       {data?.isLive && (
         <div className="space-y-3">
           <p className="text-xs font-semibold text-emerald-600">
-            ● Live from {data.provider === 'aviationstack-flights' ? 'AviationStack' : data.provider}
+            ● {t('Live from')} {data.provider === 'aviationstack-flights' ? 'AviationStack' : data.provider}
           </p>
           {data.message && (
             <p className="text-xs text-slate-500 dark:text-slate-400">{data.message}</p>
           )}
           {data.flights.length === 0 ? (
-            <div className="card p-8 text-center text-sm text-slate-500">No flights found for this route and date.</div>
+            <div className="card p-8 text-center text-sm text-slate-500">{t('No flights found for this route and date.')}</div>
           ) : (
             data.flights.map((f, i) => (
               <div key={f.id || i} className="card flex flex-wrap items-center gap-4 p-5">
@@ -107,14 +109,14 @@ export default function Flights() {
                     <Clock className="h-4 w-4 text-slate-400" />
                     {f.departAt ? new Date(f.departAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—'}
                   </span>
-                  <Badge tone={f.stops === 0 ? 'green' : 'amber'}>{f.stops === 0 ? 'Non-stop' : `${f.stops} stop${f.stops > 1 ? 's' : ''}`}</Badge>
+                  <Badge tone={f.stops === 0 ? 'green' : 'amber'}>{f.stops === 0 ? t('Non-stop') : `${f.stops} ${t('stop(s)')}`}</Badge>
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-                    {f.price?.amount ? formatCurrency(f.price.amount, f.price.currency) : 'Price on request'}
+                    {f.price?.amount ? formatCurrency(f.price.amount, f.price.currency) : t('Price on request')}
                   </p>
                   <a href={f.bookingUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-brand-600 hover:underline dark:text-brand-400">
-                    View on provider →
+                    {t('View on provider')} →
                   </a>
                 </div>
               </div>
@@ -123,7 +125,7 @@ export default function Flights() {
         </div>
       )}
 
-      {isError && <div className="card p-8 text-center text-sm text-rose-500">Search failed. Please try again.</div>}
+      {isError && <div className="card p-8 text-center text-sm text-rose-500">{t('Search failed. Please try again.')}</div>}
     </div>
   );
 }

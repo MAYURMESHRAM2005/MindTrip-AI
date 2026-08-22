@@ -8,24 +8,32 @@ import {
 import { useThemeStore } from '../store/themeStore';
 import { Moon, Sun } from 'lucide-react';
 import { APP_NAME } from '../constants';
+import { useI18n } from '../utils/i18n';
 
-const FEATURES = [
-  { icon: Bot, title: 'Multi-Agent AI Planning', desc: '17 specialized agents coordinate to plan your trip — destination, budget, hotels, transport, food, weather and safety.' },
-  { icon: Wallet, title: 'Budget Optimizer', desc: 'Deterministic budget allocation that finds cheaper hotels, public transport and free attractions when you are over budget.' },
-  { icon: Map, title: 'Maps & Live Traffic', desc: 'Interactive maps with routes, distance, travel time and traffic-aware directions when the API supports it.' },
-  { icon: CloudSun, title: 'Live Weather', desc: 'Real forecasts from OpenWeatherMap woven into your daily itinerary, with rain-day backups.' },
-  { icon: MessageSquare, title: 'Contextual Chatbot', desc: '“Make my trip ₹5,000 cheaper” — the bot really updates your itinerary and budget.' },
-  { icon: Mic, title: 'Voice Assistant', desc: '“Plan a 5-day Goa trip under ₹25,000” — speak your trip into existence.' },
-  { icon: ImageIcon, title: 'Image Search', desc: 'Upload a photo of a landmark; Gemini identifies it and Geoapify Places finds real information.' },
-  { icon: QrCode, title: 'QR Ticket Wallet', desc: 'Store your own bookings with QR codes generated from your references — never fabricated.' },
-  { icon: WifiOff, title: 'Offline Itinerary', desc: 'PWA + service worker keep your itinerary, hotel and emergency info available offline.' },
-  { icon: Hotel, title: 'Real Hotels & Flights', desc: 'Amadeus offers and Geoapify Places data when configured — and honest “Live data unavailable” otherwise.' },
-  { icon: UtensilsCrossed, title: 'Restaurant Matching', desc: 'Vegetarian, vegan or non-veg — restaurants matched to your food preference from real data.' },
-  { icon: Shield, title: 'Secure by Design', desc: 'JWT + rotating refresh tokens, httpOnly cookies, rate limiting, input validation and RBAC.' },
+const FEATURE_KEYS = [
+  { icon: Bot, key: 'featureMultiAgent' },
+  { icon: Wallet, key: 'featureBudget' },
+  { icon: Map, key: 'featureMaps' },
+  { icon: CloudSun, key: 'featureWeather' },
+  { icon: MessageSquare, key: 'featureChatbot' },
+  { icon: Mic, key: 'featureVoice' },
+  { icon: ImageIcon, key: 'featureImage' },
+  { icon: QrCode, key: 'featureQr' },
+  { icon: WifiOff, key: 'featureOffline' },
+  { icon: Hotel, key: 'featureHotels' },
+  { icon: UtensilsCrossed, key: 'featureFood' },
+  { icon: Shield, key: 'featureSecurity' },
 ];
 
 export default function Landing() {
   const { theme, toggle } = useThemeStore();
+  const { t } = useI18n();
+
+  const FEATURES = FEATURE_KEYS.map((f) => ({
+    icon: f.icon,
+    title: t(f.key + '.title'),
+    desc: t(f.key + '.desc'),
+  }));
 
   return (
     <div className="min-h-screen">
@@ -43,10 +51,10 @@ export default function Landing() {
               {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </button>
             <Link to="/login" className="btn-ghost">
-              Login
+              {t('Login')}
             </Link>
             <Link to="/register" className="btn-primary">
-              Get started <ArrowRight className="h-4 w-4" />
+              {t('Get started')} <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         </div>
@@ -59,24 +67,23 @@ export default function Landing() {
         <div className="mx-auto max-w-7xl px-4 py-20 text-center sm:px-6 sm:py-28">
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
             <span className="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white/70 px-4 py-1.5 text-xs font-bold text-brand-700 dark:border-brand-800 dark:bg-slate-900/70 dark:text-brand-300">
-              <Sparkles className="h-3.5 w-3.5" /> Multi-Agent LLM Architecture · Real Data · Real Auth
+              <Sparkles className="h-3.5 w-3.5" /> {t('Multi-Agent LLM Architecture · Real Data · Real Auth')}
             </span>
             <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-extrabold leading-tight tracking-tight text-slate-900 dark:text-white sm:text-6xl">
-              Plan smarter trips with <span className="text-gradient">17 AI agents</span> working for you
+              {t('Plan smarter trips with')} <span className="text-gradient">{t('17 AI agents')}</span> {t('working for you')}
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base text-slate-600 dark:text-slate-300 sm:text-lg">
-              {APP_NAME} plans day-by-day itineraries, optimizes your budget with deterministic math,
-              pulls live flights, hotels, weather, maps and restaurants — and never invents data it cannot get.
+              {t('landingHeroDesc')}
             </p>
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
               <Link to="/register" className="btn-primary px-6 py-3 text-base">
-                Start planning free <ArrowRight className="h-4 w-4" />
+                {t('Start planning free')} <ArrowRight className="h-4 w-4" />
               </Link>
               <Link to="/login" className="btn-secondary px-6 py-3 text-base">
-                I already have an account
+                {t('I already have an account')}
               </Link>
             </div>
-            <p className="mt-4 text-xs text-slate-400">No credit card · JWT + refresh-token auth · MongoDB persistence</p>
+            <p className="mt-4 text-xs text-slate-400">{t('landingTrustLine')}</p>
           </motion.div>
         </div>
       </section>
@@ -84,8 +91,8 @@ export default function Landing() {
       {/* Features */}
       <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6">
         <div className="mb-10 text-center">
-          <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white sm:text-3xl">Everything a traveler needs</h2>
-          <p className="mt-2 text-slate-500 dark:text-slate-400">One assistant. Real integrations. Honest data.</p>
+          <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white sm:text-3xl">{t('Everything a traveler needs')}</h2>
+          <p className="mt-2 text-slate-500 dark:text-slate-400">{t('One assistant. Real integrations. Honest data.')}</p>
         </div>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((f, i) => (
@@ -112,18 +119,18 @@ export default function Landing() {
       <section className="mx-auto max-w-4xl px-4 pb-20 sm:px-6">
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 to-brand-900 p-10 text-center text-white shadow-card">
           <div className="pointer-events-none absolute -right-10 -top-10 h-48 w-48 rounded-full bg-white/10 blur-2xl" />
-          <h2 className="text-2xl font-extrabold sm:text-3xl">Your next trip, planned by AI</h2>
+          <h2 className="text-2xl font-extrabold sm:text-3xl">{t('Your next trip, planned by AI')}</h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-brand-100">
-            Create an account, set a budget, and watch the agent pipeline build your day-by-day plan.
+            {t('Create an account, set a budget, and watch the agent pipeline build your day-by-day plan.')}
           </p>
           <Link to="/register" className="mt-6 inline-flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-brand-700 hover:bg-brand-50">
-            Create free account <ArrowRight className="h-4 w-4" />
+            {t('Create free account')} <ArrowRight className="h-4 w-4" />
           </Link>
         </div>
       </section>
 
       <footer className="border-t border-slate-200 py-6 text-center text-xs text-slate-400 dark:border-slate-800">
-        © {new Date().getFullYear()} {APP_NAME} — MERN + Multi-Agent Gemini. Data from configured providers only.
+        © {new Date().getFullYear()} {APP_NAME} — {t('landingFooter')}
       </footer>
     </div>
   );

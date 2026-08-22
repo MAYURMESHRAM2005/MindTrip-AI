@@ -9,6 +9,7 @@ import { useAuthStore } from '../store/authStore';
 import { errorMessage } from '../services/api';
 import { Input } from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import { useI18n } from '../utils/i18n';
 import { Plane } from 'lucide-react';
 
 const schema = z
@@ -26,6 +27,7 @@ const schema = z
   .refine((d) => d.password === d.confirm, { message: 'Passwords do not match', path: ['confirm'] });
 
 export default function Register() {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
@@ -38,13 +40,13 @@ export default function Register() {
       const { data } = await authApi.register({ name: values.name, email: values.email, password: values.password });
       login({ user: data.data.user, accessToken: data.data.accessToken || null });
       if (data.data.emailSent) {
-        toast.success('Account created! Check your email to verify.');
+        toast.success(t('Account created! Check your email to verify.'));
       } else {
-        toast('Account created. Email service not configured — use the verification link in logs.', { icon: '📧' });
+        toast(t('Account created. Email service not configured — use the verification link in logs.'), { icon: '📧' });
       }
       navigate('/dashboard');
     } catch (err) {
-      toast.error(errorMessage(err, 'Registration failed'));
+      toast.error(errorMessage(err, t('Registration failed')));
     } finally {
       setLoading(false);
     }
@@ -56,24 +58,24 @@ export default function Register() {
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-card">
           <Plane className="h-6 w-6" />
         </div>
-        <h1 className="text-xl font-extrabold text-slate-900 dark:text-white">Create your account</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Start planning trips with AI agents</p>
+        <h1 className="text-xl font-extrabold text-slate-900 dark:text-white">{t('Create your account')}</h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('Start planning trips with AI agents')}</p>
       </div>
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <Input label="Full name" placeholder="Aarav Sharma" error={errors.name?.message} {...register('name')} />
-        <Input label="Email" type="email" placeholder="you@example.com" error={errors.email?.message} {...register('email')} />
-        <Input label="Password" type="password" placeholder="Min 8 chars, A-Z, 0-9" error={errors.password?.message} {...register('password')} />
-        <Input label="Confirm password" type="password" placeholder="Repeat password" error={errors.confirm?.message} {...register('confirm')} />
+        <Input label={t('Full name')} placeholder="Aarav Sharma" error={errors.name?.message} {...register('name')} />
+        <Input label={t('Email')} type="email" placeholder="you@example.com" error={errors.email?.message} {...register('email')} />
+        <Input label={t('Password')} type="password" placeholder={t('Min 8 chars, A-Z, 0-9')} error={errors.password?.message} {...register('password')} />
+        <Input label={t('Confirm password')} type="password" placeholder={t('Repeat password')} error={errors.confirm?.message} {...register('confirm')} />
         <Button type="submit" loading={loading} className="w-full">
-          Create account
+          {t('Create account')}
         </Button>
       </form>
 
       <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
-        Already have an account?{' '}
+        {t('Already have an account?')}{' '}
         <Link to="/login" className="font-bold text-brand-600 hover:underline dark:text-brand-400">
-          Sign in
+          {t('Sign in')}
         </Link>
       </p>
     </div>

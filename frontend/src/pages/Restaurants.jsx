@@ -12,6 +12,7 @@ import Badge from '../components/ui/Badge';
 import { cn } from '../utils/format';
 import { haversineKm } from '../utils/geo';
 import toast from 'react-hot-toast';
+import { useI18n } from '../utils/i18n';
 
 /** Distance from the search city center (Geoapify reports it from the bias point). */
 function distanceFromCenterKm(restaurant, center) {
@@ -31,6 +32,7 @@ function restaurantsFromQuery() {
 }
 
 export default function Restaurants() {
+  const { t } = useI18n();
   const [params, setParams] = useState(restaurantsFromQuery);
   // Topbar search (?city=Goa) auto-runs the search on mount.
   const [search, setSearch] = useState(() => {
@@ -57,7 +59,7 @@ export default function Restaurants() {
   /** Search restaurants around the user's current location (browser geolocation). */
   const locateNearby = () => {
     if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by this browser');
+      toast.error(t('Geolocation is not supported by this browser'));
       return;
     }
     setLocating(true);
@@ -71,8 +73,8 @@ export default function Restaurants() {
         setLocating(false);
         toast.error(
           err.code === 1
-            ? 'Location permission denied — allow access or search by city instead'
-            : 'Could not get your location'
+            ? t('Location permission denied — allow access or search by city instead')
+            : t('Could not get your location')
         );
       },
       { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
@@ -81,13 +83,13 @@ export default function Restaurants() {
 
   return (
     <div>
-      <PageHeader icon={UtensilsCrossed} title="Restaurants" subtitle="Real Geoapify Places data with food-preference filters." />
+      <PageHeader icon={UtensilsCrossed} title={t('Restaurants')} subtitle={t('Real Geoapify Places data with food-preference filters.')} />
 
       <div className="card mb-6 p-5">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[180px] flex-1">
             <PlaceAutocomplete
-              label="City / place"
+              label={t('City / place')}
               placeholder="Goa, Pondicherry…"
               value={params.city}
               onKeyDown={(e) => e.key === 'Enter' && (params.city || params.q) && runSearch({ ...params })}
@@ -97,7 +99,7 @@ export default function Restaurants() {
           </div>
           <div className="min-w-[180px] flex-1">
             <Input
-              label="Search within (optional)"
+              label={t('Search within (optional)')}
               placeholder="seafood, rooftop, cafes…"
               value={params.q}
               onKeyDown={(e) => e.key === 'Enter' && (params.city || params.q) && runSearch({ ...params })}
@@ -106,9 +108,9 @@ export default function Restaurants() {
           </div>
           <div className="flex flex-wrap gap-2 pb-1">
             {[
-              { key: 'veg', label: '🌿 Vegetarian' },
-              { key: 'vegan', label: '🥬 Vegan' },
-              { key: 'nonVeg', label: '🍗 Non-veg' },
+              { key: 'veg', label: `🌿 ${t('Vegetarian')}` },
+              { key: 'vegan', label: `🥬 ${t('Vegan')}` },
+              { key: 'nonVeg', label: `🍗 ${t('Non-veg')}` },
             ].map((f) => (
               <button
                 key={f.key}
@@ -119,15 +121,15 @@ export default function Restaurants() {
               </button>
             ))}
             <select className="input w-auto py-1.5 text-xs" value={params.minRating} onChange={(e) => setParams({ ...params, minRating: e.target.value })}>
-              <option value="">Any rating</option>
+              <option value="">{t('Any rating')}</option>
               <option value="4">4.0+</option>
               <option value="4.5">4.5+</option>
             </select>
           </div>
           <div className="flex flex-wrap items-center gap-2 pb-1">
-            <Button icon={Search} disabled={!params.city && !params.q} onClick={() => runSearch({ ...params })}>Search restaurants</Button>
+            <Button icon={Search} disabled={!params.city && !params.q} onClick={() => runSearch({ ...params })}>{t('Search restaurants')}</Button>
             <Button variant="outline" icon={LocateFixed} loading={locating} disabled={locating} onClick={locateNearby}>
-              {locating ? 'Locating…' : 'Near me'}
+              {locating ? t('Locating…') : t('Near me')}
             </Button>
           </div>
         </div>
@@ -136,32 +138,32 @@ export default function Restaurants() {
       {isLoading && <div className="flex justify-center py-12"><Spinner size="lg" /></div>}
 
       {data && !data.isLive && (
-        <ProviderNotice title="Live restaurant data unavailable" message={data.message} externalSources={[{ name: 'OpenStreetMap', url: 'https://www.openstreetmap.org' }, { name: 'Zomato', url: 'https://www.zomato.com' }]} />
+        <ProviderNotice title={t('Live restaurant data unavailable')} message={data.message} externalSources={[{ name: 'OpenStreetMap', url: 'https://www.openstreetmap.org' }, { name: 'Zomato', url: 'https://www.zomato.com' }]} />
       )}
 
       {data?.isLive && (
         <>
           <p className="mb-3 text-xs font-semibold text-emerald-600">
-            ● Live from Geoapify Places
+            ● {t('Live from Geoapify Places')}
             {nearby ? (
-              <span className="text-slate-500"> · near your location</span>
+              <span className="text-slate-500"> · {t('near your location')}</span>
             ) : data.searchedCity ? (
-              <span className="text-slate-500"> · near {data.searchedCity}</span>
+              <span className="text-slate-500"> · {t('near')} {data.searchedCity}</span>
             ) : null}
             {data.filterApplied && (
-              <span className="text-slate-400"> · diet filter requested (Places may not expose diet labels — check each listing)</span>
+              <span className="text-slate-400"> · {t('diet filter requested (Places may not expose diet labels — check each listing)')}</span>
             )}
           </p>
           {nearby && (
             <div className="mb-3 flex items-center gap-2">
               <LocateFixed className="h-4 w-4 text-emerald-600" />
-              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Nearby restaurants</h3>
-              <span className="text-xs text-slate-400">within 5 km of your location</span>
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">{t('Nearby restaurants')}</h3>
+              <span className="text-xs text-slate-400">{t('within 5 km of your location')}</span>
             </div>
           )}
           {data.restaurants.length === 0 ? (
             <div className="card p-8 text-center text-sm text-slate-500">
-              No matching restaurants. Try clearing the diet filter — diet details aren't always exposed by Places.
+              {t("No matching restaurants. Try clearing the diet filter — diet details aren't always exposed by Places.")}
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -172,7 +174,7 @@ export default function Restaurants() {
                   <div className="flex items-start justify-between gap-3">
                     <h3 className="font-extrabold text-slate-900 dark:text-white">{r.name}</h3>
                     {r.openNow != null && (
-                      <Badge tone={r.openNow ? 'green' : 'slate'}>{r.openNow ? 'Open' : 'Closed'}</Badge>
+                      <Badge tone={r.openNow ? 'green' : 'slate'}>{r.openNow ? t('Open') : t('Closed')}</Badge>
                     )}
                   </div>
                   <div className="mt-1.5 flex items-center gap-2 text-xs">
@@ -191,7 +193,7 @@ export default function Restaurants() {
                   )}
                   {distKm != null && (
                     <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                      <Navigation className="h-3 w-3 shrink-0" /> {formatDistanceKm(distKm)} {nearby ? 'from your location' : 'from city center'}
+                      <Navigation className="h-3 w-3 shrink-0" /> {formatDistanceKm(distKm)} {nearby ? t('from your location') : t('from city center')}
                     </p>
                   )}
                     <div className="mt-auto pt-3">
@@ -201,7 +203,7 @@ export default function Restaurants() {
                         rel="noreferrer"
                         className="btn-secondary w-full py-1.5 text-xs"
                       >
-                        View on map
+                        {t('View on map')}
                       </a>
                     </div>
                   </div>

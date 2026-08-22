@@ -52,6 +52,38 @@ test('all feature routes are wired and respond', { skip: skipReason }, async () 
     assert.equal(tripRes.status, 201, JSON.stringify(tripRes.body));
     const tripId = tripRes.body.data.trip._id;
 
+    // Self-healing validation: inject the legacy false-positive overlap warning
+    // (the exact bug reported in the UI) into the stored itinerary, then GET it
+    // and confirm the read path re-runs the deterministic validator and heals it.
+    const Itinerary = (await import('../src/models/Itinerary.js')).default;
+    await Itinerary.updateOne(
+      { trip: tripId },
+      {
+        $set: {
+          validation: {
+            passed: false,
+            issues: [
+              'Day 1: "Dinner" at 20:00 overlaps "Local transport & transfers"',
+              'Day 2: "Dinner" at 20:00 overlaps "Local transport & transfers"',
+              'Day 3: "Dinner" at 20:00 overlaps "Local transport & transfers"',
+              'Day 4: "Dinner" at 20:00 overlaps "Local transport & transfers"',
+              'Day 5: "Dinner" at 20:00 overlaps "Local transport & transfers"',
+            ],
+            warnings: [],
+            validatedAt: new Date(),
+          },
+        },
+      }
+    );
+    const healed = await agent.get(`/api/trips/${tripId}/itinerary`);
+    assert.equal(healed.status, 200);
+    assert.equal(
+      healed.body.data.itinerary.validation.issues.some((i) => i.includes('overlaps')),
+      false,
+      'stale overlap warnings must be healed on read'
+    );
+    assert.equal(healed.body.data.itinerary.validation.passed, true);
+
     const cases = [
       ['GET', '/api/users/me', 200],
       ['GET', '/api/users/preferences', 200],
@@ -93,6 +125,31 @@ test('all feature routes are wired and respond', { skip: skipReason }, async () 
         assert.equal(res.body.success, expected < 400, `${method} ${url} should report success=${expected < 400}`);
       }
     }
+
+    // Mutation paths must also heal validation: corrupt stored issues, call
+    // the budget optimizer (which drops/rewrites activities), then confirm the
+    // served itinerary re-validates clean.
+    await Itinerary.updateOne(
+      { trip: tripId },
+      {
+        $set: {
+          validation: {
+            passed: false,
+            issues: ['Day 1: "Lunch" at 13:00 overlaps "Local transport & transfers"'],
+            warnings: [],
+            validatedAt: new Date(),
+          },
+        },
+      }
+    );
+    await agent.post(`/api/trips/${tripId}/optimize-budget`).send({});
+    const afterOptimize = await agent.get(`/api/trips/${tripId}/itinerary`);
+    assert.equal(afterOptimize.status, 200);
+    assert.equal(
+      afterOptimize.body.data.itinerary.validation.issues.some((i) => i.includes('overlaps')),
+      false,
+      'optimize-budget must heal stale overlap warnings'
+    );
 
     // PDF downloads
     const pdf = await agent.get(`/api/trips/${tripId}/pdf`);

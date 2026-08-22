@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 
 function initialTheme() {
+  // Default to the light theme. Only an explicit saved choice (user toggled
+  // the theme before) is honoured — the OS dark-mode preference is ignored so
+  // the app always opens in light mode by default.
   const saved = localStorage.getItem('travelmind-theme');
   if (saved === 'dark' || saved === 'light') return saved;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  return 'light';
 }
 
 export const useThemeStore = create((set, get) => ({

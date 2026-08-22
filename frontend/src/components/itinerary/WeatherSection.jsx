@@ -3,6 +3,7 @@ import { CloudSun, Droplets, Wind, Umbrella, Sunrise, Sunset, Thermometer } from
 import Card, { CardHeader } from '../ui/Card';
 import Badge from '../ui/Badge';
 import { formatDateShort } from '../../utils/format';
+import { useI18n } from '../../utils/i18n';
 
 function weatherEmoji(icon) {
   const map = {
@@ -20,14 +21,15 @@ function epochTime(ts) {
 }
 
 export default function WeatherSection({ weatherDaily = [], isLive, note }) {
+  const { t } = useI18n();
   if (!weatherDaily.length) return null;
   return (
     <Card className="mb-6">
       <CardHeader
         icon={CloudSun}
-        title="Daily weather"
-        subtitle="Day-by-day forecast for your trip"
-        action={<Badge tone={isLive ? 'green' : 'amber'}>{isLive ? '● Live forecast' : 'Estimate'}</Badge>}
+        title={t('Daily weather')}
+        subtitle={t('Day-by-day forecast for your trip')}
+        action={<Badge tone={isLive ? 'green' : 'amber'}>{isLive ? `● ${t('Live forecast')}` : t('Estimate')}</Badge>}
       />
       {note && <p className="mb-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-900/40 dark:text-slate-400">{note}</p>}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -35,7 +37,7 @@ export default function WeatherSection({ weatherDaily = [], isLive, note }) {
           <div key={i} className="rounded-2xl border border-slate-100 bg-gradient-to-br from-sky-50/70 to-white p-4 dark:border-slate-800 dark:from-slate-900/60 dark:to-slate-900/20">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-bold text-slate-900 dark:text-white">{d.date ? formatDateShort(d.date) : `Day ${d.day}`}</p>
+                <p className="text-sm font-bold text-slate-900 dark:text-white">{d.date ? formatDateShort(d.date) : `${t('Day')} ${d.day}`}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">{d.condition || '—'}</p>
               </div>
               <span className="text-3xl">{weatherEmoji(d.icon)}</span>
@@ -47,7 +49,7 @@ export default function WeatherSection({ weatherDaily = [], isLive, note }) {
             </div>
             <div className="mt-2 grid grid-cols-2 gap-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
               {d.humidity != null && <span className="inline-flex items-center gap-1"><Droplets className="h-3 w-3 text-sky-500" /> {d.humidity}%</span>}
-              {d.rainProbability != null && <span className="inline-flex items-center gap-1"><Umbrella className="h-3 w-3 text-blue-500" /> {d.rainProbability}% rain</span>}
+              {d.rainProbability != null && <span className="inline-flex items-center gap-1"><Umbrella className="h-3 w-3 text-blue-500" /> {d.rainProbability}% {t('rain')}</span>}
               {d.windSpeed != null && <span className="inline-flex items-center gap-1"><Wind className="h-3 w-3 text-slate-500" /> {d.windSpeed} m/s</span>}
               {d.sunrise != null && <span className="inline-flex items-center gap-1"><Sunrise className="h-3 w-3 text-amber-500" /> {epochTime(d.sunrise)}</span>}
               {d.sunset != null && <span className="inline-flex items-center gap-1"><Sunset className="h-3 w-3 text-orange-500" /> {epochTime(d.sunset)}</span>}

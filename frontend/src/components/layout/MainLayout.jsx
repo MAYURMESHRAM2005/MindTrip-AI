@@ -62,12 +62,12 @@ export default function MainLayout() {
               }`}
             >
               <span className={`h-2 w-2 rounded-full ${online ? 'bg-emerald-500' : 'bg-amber-500'} animate-pulse`} />
-              {online ? 'Online' : 'Offline'}
+              {online ? t('Online') : t('Offline')}
             </span>
             <button
               onClick={toggle}
               className="rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-              aria-label="Toggle theme"
+              aria-label={t('Toggle theme')}
             >
               {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
             </button>

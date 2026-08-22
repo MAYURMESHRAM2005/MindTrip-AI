@@ -8,10 +8,12 @@ import { timeAgo } from '../utils/format';
 import { PageLoader } from '../components/ui/Spinner';
 import EmptyState from '../components/ui/EmptyState';
 import toast from 'react-hot-toast';
+import { useI18n } from '../utils/i18n';
 
 const ICONS = { trip: Plane, budget: Wallet, weather: CloudSun, safety: Shield, chat: MessageSquare, system: Bell };
 
 export default function Notifications() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ['notifications'],
@@ -31,7 +33,7 @@ export default function Notifications() {
   const clearAll = useMutation({
     mutationFn: () => notificationsApi.clear(),
     onSuccess: () => {
-      toast.success('Notifications cleared');
+      toast.success(t('Notifications cleared'));
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
@@ -42,18 +44,18 @@ export default function Notifications() {
     <div className="mx-auto max-w-2xl">
       <PageHeader
         icon={Bell}
-        title="Notifications"
-        subtitle={`${data?.unreadCount || 0} unread`}
+        title={t('Notifications')}
+        subtitle={`${data?.unreadCount || 0} ${t('unread')}`}
         actions={
           <>
-            <button onClick={() => markAll.mutate()} className="btn-secondary"><CheckCheck className="h-4 w-4" /> Mark all read</button>
-            <button onClick={() => clearAll.mutate()} className="btn-ghost text-rose-500"><Trash2 className="h-4 w-4" /> Clear</button>
+            <button onClick={() => markAll.mutate()} className="btn-secondary"><CheckCheck className="h-4 w-4" /> {t('Mark all read')}</button>
+            <button onClick={() => clearAll.mutate()} className="btn-ghost text-rose-500"><Trash2 className="h-4 w-4" /> {t('Clear')}</button>
           </>
         }
       />
 
       {notifications.length === 0 ? (
-        <EmptyState icon={Bell} title="All caught up" message="Trip, budget, weather and safety notifications appear here." />
+        <EmptyState icon={Bell} title={t('All caught up')} message={t('Trip, budget, weather and safety notifications appear here.')} />
       ) : (
         <div className="space-y-2">
           {notifications.map((n) => {

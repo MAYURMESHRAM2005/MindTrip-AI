@@ -10,6 +10,7 @@ import { hotelsApi } from '../services/apiClient';
 import { Spinner } from '../components/ui/Spinner';
 import { formatCurrency, todayISO } from '../utils/format';
 import Badge from '../components/ui/Badge';
+import { useI18n } from '../utils/i18n';
 
 function hotelsFromQuery() {
   const sp = new URLSearchParams(window.location.search);
@@ -25,6 +26,7 @@ function hotelsFromQuery() {
 }
 
 export default function Hotels() {
+  const { t } = useI18n();
   const [params, setParams] = useState(hotelsFromQuery);
   // Topbar search (?city=Goa) auto-runs the search on mount.
   const [search, setSearch] = useState(() => {
@@ -40,19 +42,19 @@ export default function Hotels() {
 
   return (
     <div>
-      <PageHeader icon={Hotel} title="Hotels" subtitle="Live offers from Amadeus, with Geoapify Places fallback." />
+      <PageHeader icon={Hotel} title={t('Hotels')} subtitle={t('Live offers from Amadeus, with Geoapify Places fallback.')} />
 
       <div className="card mb-6 p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <PlaceAutocomplete label="City / destination" placeholder="Goa" value={params.city} onChange={(city) => setParams({ ...params, city })} />
-          <Input label="Check-in" type="date" min={todayISO()} value={params.checkIn} onChange={(e) => setParams({ ...params, checkIn: e.target.value })} />
-          <Input label="Check-out" type="date" min={params.checkIn || todayISO()} value={params.checkOut} onChange={(e) => setParams({ ...params, checkOut: e.target.value })} />
-          <Input label="Guests" type="number" min={1} value={params.adults} onChange={(e) => setParams({ ...params, adults: Number(e.target.value) || 1 })} />
-          <Input label="Max price / night" type="number" placeholder="5000" value={params.maxPrice} onChange={(e) => setParams({ ...params, maxPrice: e.target.value })} />
-          <Select label="Min rating" value={params.minRating} onChange={(e) => setParams({ ...params, minRating: e.target.value })} options={[{ value: '', label: 'Any' }, { value: '3', label: '3+' }, { value: '4', label: '4+' }, { value: '4.5', label: '4.5+' }]} />
+          <PlaceAutocomplete label={t('City / destination')} placeholder="Goa" value={params.city} onChange={(city) => setParams({ ...params, city })} />
+          <Input label={t('Check-in')} type="date" min={todayISO()} value={params.checkIn} onChange={(e) => setParams({ ...params, checkIn: e.target.value })} />
+          <Input label={t('Check-out')} type="date" min={params.checkIn || todayISO()} value={params.checkOut} onChange={(e) => setParams({ ...params, checkOut: e.target.value })} />
+          <Input label={t('Guests')} type="number" min={1} value={params.adults} onChange={(e) => setParams({ ...params, adults: Number(e.target.value) || 1 })} />
+          <Input label={t('Max price / night')} type="number" placeholder="5000" value={params.maxPrice} onChange={(e) => setParams({ ...params, maxPrice: e.target.value })} />
+          <Select label={t('Min rating')} value={params.minRating} onChange={(e) => setParams({ ...params, minRating: e.target.value })} options={[{ value: '', label: t('Any') }, { value: '3', label: '3+' }, { value: '4', label: '4+' }, { value: '4.5', label: '4.5+' }]} />
         </div>
         <Button className="mt-4" icon={Search} disabled={!params.city || !params.checkIn || !params.checkOut} onClick={() => setSearch({ ...params })}>
-          Search hotels
+          {t('Search hotels')}
         </Button>
       </div>
 
@@ -60,8 +62,8 @@ export default function Hotels() {
 
       {data && !data.isLive && (
         <ProviderNotice
-          title="Live hotel data unavailable"
-          message={data.message || 'Hotel providers are not configured.'}
+          title={t('Live hotel data unavailable')}
+          message={data.message || t('Hotel providers are not configured.')}
           externalSources={[{ name: 'Booking.com', url: 'https://www.booking.com' }, { name: 'MakeMyTrip', url: 'https://www.makemytrip.com' }]}
         />
       )}
@@ -69,7 +71,7 @@ export default function Hotels() {
       {data?.isLive && (
         <div className="space-y-3">
           <p className="text-xs font-semibold text-emerald-600">
-            ● {data.provider === 'amadeus' ? 'Live offers from Amadeus' : 'Live listings from Geoapify Places'}
+            ● {data.provider === 'amadeus' ? t('Live offers from Amadeus') : t('Live listings from Geoapify Places')}
             {data.note && <span className="text-slate-400"> · {data.note}</span>}
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -91,15 +93,15 @@ export default function Hotels() {
                     <MapPin className="mt-0.5 h-3 w-3 shrink-0" /> {h.address}
                   </p>
                 )}
-                {h.priceLevel != null && <p className="text-xs text-slate-400">{'₹'.repeat(h.priceLevel + 1) || ''} price level</p>}
+                {h.priceLevel != null && <p className="text-xs text-slate-400">{'₹'.repeat(h.priceLevel + 1) || ''} {t('price level')}</p>}
                 <div className="mt-auto flex items-center justify-between pt-3">
                   <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-                    {h.price?.amount ? formatCurrency(h.price.amount, h.price.currency || 'INR') : 'Price on request'}
-                    {h.price?.amount && <span className="text-xs font-medium text-slate-400"> /night</span>}
+                    {h.price?.amount ? formatCurrency(h.price.amount, h.price.currency || 'INR') : t('Price on request')}
+                    {h.price?.amount && <span className="text-xs font-medium text-slate-400"> {t('/night')}</span>}
                   </p>
                   {h.bookingUrl && (
                     <a href={h.bookingUrl} target="_blank" rel="noreferrer" className="btn-secondary px-3 py-1.5 text-xs">
-                      Book
+                      {t('Book')}
                     </a>
                   )}
                 </div>

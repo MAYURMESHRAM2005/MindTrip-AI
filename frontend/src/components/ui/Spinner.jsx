@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '../../utils/i18n';
 import { cn } from '../../utils/format';
 
 export function Spinner({ className, size = 'md' }) {
@@ -14,11 +15,12 @@ export function Spinner({ className, size = 'md' }) {
   );
 }
 
-export function PageLoader({ label = 'Loading…' }) {
+export function PageLoader({ label }) {
+  const { t } = useI18n();
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3">
       <Spinner size="lg" />
-      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="text-sm font-medium text-slate-500 dark:text-slate-400">{label || t('Loading…')}</p>
     </div>
   );
 }

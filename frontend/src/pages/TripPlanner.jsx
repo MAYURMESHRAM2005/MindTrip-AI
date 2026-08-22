@@ -15,14 +15,15 @@ import { tripApi } from '../services/apiClient';
 import { errorMessage } from '../services/api';
 import { TRAVEL_STYLES, CURRENCIES, INTERESTS } from '../constants';
 import { cn, todayISO } from '../utils/format';
+import { useI18n } from '../utils/i18n';
 
 const STEPS = [
-  { key: 'where', title: 'Where & when', icon: MapPin },
-  { key: 'travelers', title: 'Travelers', icon: Users },
-  { key: 'budget', title: 'Budget', icon: Wallet },
-  { key: 'style', title: 'Travel style', icon: Compass },
-  { key: 'preferences', title: 'Preferences', icon: UtensilsCrossed },
-  { key: 'generate', title: 'Generate', icon: Sparkles },
+  { key: 'where', titleKey: 'Where & when', icon: MapPin },
+  { key: 'travelers', titleKey: 'Travelers', icon: Users },
+  { key: 'budget', titleKey: 'Budget', icon: Wallet },
+  { key: 'style', titleKey: 'Travel style', icon: Compass },
+  { key: 'preferences', titleKey: 'Preferences', icon: UtensilsCrossed },
+  { key: 'generate', titleKey: 'Generate', icon: Sparkles },
 ];
 
 const initialForm = {
@@ -58,6 +59,7 @@ function formFromQuery() {
 }
 
 export default function TripPlanner() {
+  const { t } = useI18n();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState(formFromQuery);
   const [generating, setGenerating] = useState(false);
@@ -68,11 +70,11 @@ export default function TripPlanner() {
 
   const validateStep = () => {
     if (step === 0) {
-      if (!form.destination && !form.suggestDestination) return 'Enter a destination or choose "Suggest destination"';
-      if (!form.startDate || !form.endDate) return 'Pick departure and return dates';
-      if (new Date(form.endDate) < new Date(form.startDate)) return 'Return date must be after departure date';
+      if (!form.destination && !form.suggestDestination) return t('Enter a destination or choose "Suggest destination"');
+      if (!form.startDate || !form.endDate) return t('Pick departure and return dates');
+      if (new Date(form.endDate) < new Date(form.startDate)) return t('Return date must be after departure date');
     }
-    if (step === 2 && (!form.totalBudget || form.totalBudget <= 0)) return 'Enter a total budget';
+    if (step === 2 && (!form.totalBudget || form.totalBudget <= 0)) return t('Enter a total budget');
     return null;
   };
 
@@ -95,10 +97,10 @@ export default function TripPlanner() {
         startDate: new Date(form.startDate).toISOString(),
         endDate: new Date(form.endDate).toISOString(),
       });
-      toast.success('Trip planned by the agents! 🎉');
+      toast.success(t('Trip planned by the agents! 🎉'));
       navigate(`/itinerary/${data.data.trip._id}`);
     } catch (e) {
-      toast.error(errorMessage(e, 'Trip generation failed'));
+      toast.error(errorMessage(e, t('Trip generation failed')));
     } finally {
       setGenerating(false);
       setPipelineDone(true);
@@ -113,7 +115,7 @@ export default function TripPlanner() {
 
   return (
     <div>
-      <PageHeader icon={Compass} title="Trip Planner" subtitle="A multi-step form that feeds the multi-agent pipeline." />
+      <PageHeader icon={Compass} title={t('Trip Planner')} subtitle={t('A multi-step form that feeds the multi-agent pipeline.')} />
 
       {/* Stepper */}
       <div className="mb-8 flex items-center gap-1 overflow-x-auto pb-2">
@@ -131,7 +133,7 @@ export default function TripPlanner() {
               )}
             >
               <s.icon className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{s.title}</span>
+              <span className="hidden sm:inline">{t(s.titleKey)}</span>
               <span className="sm:hidden">{i + 1}</span>
             </button>
             {i < STEPS.length - 1 && <div className="h-px w-4 bg-slate-200 dark:bg-slate-700" />}
@@ -150,9 +152,9 @@ export default function TripPlanner() {
           <div className="card max-w-3xl p-6 sm:p-8">
             {step === 0 && (
               <div className="space-y-5">
-                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">Where are you going?</h2>
-                <PlaceAutocomplete label="Starting city" placeholder="Mumbai" value={form.origin} onChange={(v) => set({ origin: v })} />
-                <Field label="Destination" hint={form.suggestDestination ? 'The Destination Agent will suggest one' : ''}>
+                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t('Where are you going?')}</h2>
+                <PlaceAutocomplete label={t('Starting city')} placeholder="Mumbai" value={form.origin} onChange={(v) => set({ origin: v })} />
+                <Field label={t('Destination')} hint={form.suggestDestination ? t('The Destination Agent will suggest one') : ''}>
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <PlaceAutocomplete
                       placeholder="Goa / Paris / Tokyo…"
@@ -166,26 +168,26 @@ export default function TripPlanner() {
                       onClick={() => set({ suggestDestination: !form.suggestDestination, destination: '' })}
                       className={cn('btn whitespace-nowrap', form.suggestDestination ? 'btn-primary' : 'btn-secondary')}
                     >
-                      <Wand2 className="h-4 w-4" /> Suggest destination
+                      <Wand2 className="h-4 w-4" /> {t('Suggest destination')}
                     </button>
                   </div>
                 </Field>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Input label="Departure date" type="date" min={todayISO()} value={form.startDate} onChange={(e) => set({ startDate: e.target.value })} />
-                  <Input label="Return date" type="date" min={form.startDate || todayISO()} value={form.endDate} onChange={(e) => set({ endDate: e.target.value })} />
+                  <Input label={t('Departure date')} type="date" min={todayISO()} value={form.startDate} onChange={(e) => set({ startDate: e.target.value })} />
+                  <Input label={t('Return date')} type="date" min={form.startDate || todayISO()} value={form.endDate} onChange={(e) => set({ endDate: e.target.value })} />
                 </div>
-                <Input label="Trip title (optional)" placeholder="Goa Summer Getaway" value={form.title} onChange={(e) => set({ title: e.target.value })} />
+                <Input label={t('Trip title (optional)')} placeholder="Goa Summer Getaway" value={form.title} onChange={(e) => set({ title: e.target.value })} />
               </div>
             )}
 
             {step === 1 && (
               <div className="space-y-5">
-                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">Who's traveling?</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t("Who's traveling?")}</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Input label="Adults" type="number" min={1} max={20} value={form.adults} onChange={(e) => set({ adults: Number(e.target.value) || 1 })} />
-                  <Input label="Children" type="number" min={0} max={20} value={form.children} onChange={(e) => set({ children: Number(e.target.value) || 0 })} />
+                  <Input label={t('Adults')} type="number" min={1} max={20} value={form.adults} onChange={(e) => set({ adults: Number(e.target.value) || 1 })} />
+                  <Input label={t('Children')} type="number" min={0} max={20} value={form.children} onChange={(e) => set({ children: Number(e.target.value) || 0 })} />
                 </div>
-                <Field label="Activity level">
+                <Field label={t('Activity level')}>
                   <div className="flex gap-2">
                     {['relaxed', 'moderate', 'active'].map((l) => (
                       <button
@@ -204,21 +206,20 @@ export default function TripPlanner() {
 
             {step === 2 && (
               <div className="space-y-5">
-                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">What's your budget?</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t("What's your budget?")}</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Input label="Total budget" type="number" min={0} value={form.totalBudget} onChange={(e) => set({ totalBudget: Number(e.target.value) })} />
-                  <Select label="Currency" value={form.currency} onChange={(e) => set({ currency: e.target.value })} options={CURRENCIES} />
+                  <Input label={t('Total budget')} type="number" min={0} value={form.totalBudget} onChange={(e) => set({ totalBudget: Number(e.target.value) })} />
+                  <Select label={t('Currency')} value={form.currency} onChange={(e) => set({ currency: e.target.value })} options={CURRENCIES} />
                 </div>
                 <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
-                  💡 The Budget Agent allocates this across transport, hotels, food, activities and an emergency reserve —
-                  and finds cheaper alternatives if your plan goes over.
+                  💡 {t('The Budget Agent allocates this across transport, hotels, food, activities and an emergency reserve — and finds cheaper alternatives if your plan goes over.')}
                 </p>
               </div>
             )}
 
             {step === 3 && (
               <div className="space-y-5">
-                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">Choose your travel style</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t('Choose your travel style')}</h2>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                   {TRAVEL_STYLES.map((s) => (
                     <button
@@ -236,7 +237,7 @@ export default function TripPlanner() {
                     </button>
                   ))}
                 </div>
-                <Field label="Interests (pick any)">
+                <Field label={t('Interests (pick any)')}>
                   <div className="flex flex-wrap gap-2">
                     {INTERESTS.map((i) => (
                       <button
@@ -260,27 +261,27 @@ export default function TripPlanner() {
 
             {step === 4 && (
               <div className="space-y-5">
-                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">Preferences</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t('Preferences')}</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Select
-                    label="Food preference"
+                    label={t('Food preference')}
                     value={form.foodPreference}
                     onChange={(e) => set({ foodPreference: e.target.value })}
                     options={['', 'vegetarian', 'vegan', 'non-vegetarian', 'jain', 'halal']}
                   />
                   <Select
-                    label="Hotel preference"
+                    label={t('Hotel preference')}
                     value={form.hotelPreference}
                     onChange={(e) => set({ hotelPreference: e.target.value })}
                     options={['', 'budget', 'boutique', 'luxury', 'hostel', 'resort', 'business']}
                   />
                   <Select
-                    label="Transport preference"
+                    label={t('Transport preference')}
                     value={form.transportPreference}
                     onChange={(e) => set({ transportPreference: e.target.value })}
                     options={['', 'flight', 'train', 'bus', 'public', 'drive']}
                   />
-                  <Field label="Accessibility requirements">
+                  <Field label={t('Accessibility requirements')}>
                     <input
                       className="input"
                       placeholder="e.g. wheelchair access, reduced walking"
@@ -295,14 +296,14 @@ export default function TripPlanner() {
             {step === 5 && (
               <div className="space-y-6">
                 <div className="rounded-2xl bg-gradient-to-br from-brand-600 to-brand-900 p-6 text-white">
-                  <h2 className="text-lg font-extrabold">Ready to generate 🚀</h2>
+                  <h2 className="text-lg font-extrabold">{t('Ready to generate')} 🚀</h2>
                   <p className="mt-1 text-sm text-brand-100">
-                    {form.destination || 'A suggested destination'} · {form.startDate} → {form.endDate} · {form.adults} adult(s)
+                    {form.destination || t('A suggested destination')} · {form.startDate} → {form.endDate} · {form.adults} {t('adult(s)')}
                     · {form.currency} {Number(form.totalBudget).toLocaleString()} · {form.travelStyle}
                   </p>
                 </div>
                 <Button onClick={generate} loading={generating} className="w-full py-3.5 text-base">
-                  <Sparkles className="h-5 w-5" /> Run the agent pipeline
+                  <Sparkles className="h-5 w-5" /> {t('Run the agent pipeline')}
                 </Button>
               </div>
             )}
@@ -310,10 +311,10 @@ export default function TripPlanner() {
             {step < 5 && (
               <div className="mt-8 flex items-center justify-between">
                 <Button variant="ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0}>
-                  <ArrowLeft className="h-4 w-4" /> Back
+                  <ArrowLeft className="h-4 w-4" /> {t('Back')}
                 </Button>
                 <Button onClick={next}>
-                  Continue <ArrowRight className="h-4 w-4" />
+                  {t('Continue')} <ArrowRight className="h-4 w-4" />
                 </Button>
               </div>
             )}

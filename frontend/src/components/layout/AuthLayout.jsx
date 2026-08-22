@@ -3,9 +3,11 @@ import { Outlet, Link } from 'react-router-dom';
 import { Plane, Moon, Sun } from 'lucide-react';
 import { useThemeStore } from '../../store/themeStore';
 import { APP_NAME } from '../../constants';
+import { useI18n } from '../../utils/i18n';
 
 export default function AuthLayout() {
   const { theme, toggle } = useThemeStore();
+  const { t } = useI18n();
   return (
     <div className="gradient-hero flex min-h-screen flex-col">
       <header className="flex items-center justify-between px-6 py-5">
@@ -28,7 +30,7 @@ export default function AuthLayout() {
         </div>
       </main>
       <footer className="px-6 py-4 text-center text-xs text-slate-400">
-        © {new Date().getFullYear()} {APP_NAME} · Multi-Agent LLM Travel Planning
+        © {new Date().getFullYear()} {APP_NAME} · {t('Multi-Agent LLM Travel Planning')}
       </footer>
     </div>
   );

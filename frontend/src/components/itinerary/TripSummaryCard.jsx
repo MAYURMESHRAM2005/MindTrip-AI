@@ -6,6 +6,7 @@ import {
 import Card, { CardHeader } from '../ui/Card';
 import Badge from '../ui/Badge';
 import { formatCurrency } from '../../utils/format';
+import { useI18n } from '../../utils/i18n';
 
 function Field({ icon: Icon, label, value, sub }) {
   return (
@@ -31,6 +32,7 @@ function weatherEmoji(icon) {
 }
 
 export default function TripSummaryCard({ summary, currency }) {
+  const { t } = useI18n();
   if (!summary) return null;
   const w = summary.currentWeather;
 
@@ -38,24 +40,24 @@ export default function TripSummaryCard({ summary, currency }) {
     <Card className="mb-6">
       <CardHeader
         icon={MapPin}
-        title="Trip summary"
-        subtitle="Your trip at a glance"
+        title={t('Trip summary')}
+        subtitle={t('Your trip at a glance')}
         action={summary.destination ? <Badge tone="violet">{summary.destination}</Badge> : null}
       />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Field icon={CalendarRange} label="Duration" value={summary.durationDays ? `${summary.durationDays} day${summary.durationDays > 1 ? 's' : ''}` : '—'} />
+        <Field icon={CalendarRange} label={t('Duration')} value={summary.durationDays ? `${summary.durationDays} ${t('day(s)')}` : '—'} />
         <Field
           icon={Users}
-          label="Travellers"
-          value={summary.travellers?.total ? `${summary.travellers.total} people` : '—'}
-          sub={`${summary.travellers?.adults || 0} adults · ${summary.travellers?.children || 0} children`}
+          label={t('Travellers')}
+          value={summary.travellers?.total ? `${summary.travellers.total} ${t('people')}` : '—'}
+          sub={`${summary.travellers?.adults || 0} ${t('adults')} · ${summary.travellers?.children || 0} ${t('children')}`}
         />
-        <Field icon={Wallet} label="Budget" value={formatCurrency(summary.budget?.total, currency)} />
-        <Field icon={Palette} label="Travel style" value={summary.travelStyle} />
-        <Field icon={BedDouble} label="Hotel category" value={summary.hotelCategory} />
-        <Field icon={UtensilsCrossed} label="Food preference" value={summary.foodPreference} />
-        <Field icon={Plane} label="Transport mode" value={summary.transportMode} />
-        <Field icon={Sun} label="Best time to visit" value={summary.bestTimeToVisit} />
+        <Field icon={Wallet} label={t('Budget')} value={formatCurrency(summary.budget?.total, currency)} />
+        <Field icon={Palette} label={t('Travel style')} value={summary.travelStyle} />
+        <Field icon={BedDouble} label={t('Hotel category')} value={summary.hotelCategory} />
+        <Field icon={UtensilsCrossed} label={t('Food preference')} value={summary.foodPreference} />
+        <Field icon={Plane} label={t('Transport mode')} value={summary.transportMode} />
+        <Field icon={Sun} label={t('Best time to visit')} value={summary.bestTimeToVisit} />
       </div>
       {w && (
         <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-sky-100 bg-sky-50/70 p-3 dark:border-sky-900/60 dark:bg-sky-950/30">
@@ -65,7 +67,7 @@ export default function TripSummaryCard({ summary, currency }) {
           </span>
           {w.humidity != null && (
             <span className="inline-flex items-center gap-1 text-xs font-semibold text-sky-700 dark:text-sky-300">
-              <Droplets className="h-3.5 w-3.5" /> {w.humidity}% humidity
+              <Droplets className="h-3.5 w-3.5" /> {w.humidity}% {t('humidity')}
             </span>
           )}
           {w.windSpeed != null && (
@@ -74,7 +76,7 @@ export default function TripSummaryCard({ summary, currency }) {
             </span>
           )}
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-sky-700 dark:text-sky-300">
-            <Clock className="h-3.5 w-3.5" /> {w.isLive ? 'Live weather' : 'Weather estimate'}
+            <Clock className="h-3.5 w-3.5" /> {w.isLive ? t('Live weather') : t('Weather estimate')}
           </span>
         </div>
       )}

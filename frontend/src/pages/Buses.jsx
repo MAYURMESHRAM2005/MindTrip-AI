@@ -9,8 +9,10 @@ import ProviderNotice from '../components/ProviderNotice';
 import { busesApi } from '../services/apiClient';
 import { Spinner } from '../components/ui/Spinner';
 import { formatCurrency, todayISO } from '../utils/format';
+import { useI18n } from '../utils/i18n';
 
 export default function Buses() {
+  const { t } = useI18n();
   const [params, setParams] = useState({ from: '', to: '', date: '', passengers: 1 });
   const [search, setSearch] = useState(null);
 
@@ -22,17 +24,17 @@ export default function Buses() {
 
   return (
     <div>
-      <PageHeader icon={Bus} title="Buses" subtitle="Live schedules from a configured bus provider." />
+      <PageHeader icon={Bus} title={t('Buses')} subtitle={t('Live schedules from a configured bus provider.')} />
 
       <div className="card mb-6 p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <PlaceAutocomplete label="From" placeholder="Pune" value={params.from} onChange={(v) => setParams({ ...params, from: v })} />
-          <PlaceAutocomplete label="To" placeholder="Goa" value={params.to} onChange={(v) => setParams({ ...params, to: v })} />
-          <Input label="Date" type="date" min={todayISO()} value={params.date} onChange={(e) => setParams({ ...params, date: e.target.value })} />
-          <Input label="Passengers" type="number" min={1} value={params.passengers} onChange={(e) => setParams({ ...params, passengers: Number(e.target.value) || 1 })} />
+          <PlaceAutocomplete label={t('From')} placeholder="Pune" value={params.from} onChange={(v) => setParams({ ...params, from: v })} />
+          <PlaceAutocomplete label={t('To')} placeholder="Goa" value={params.to} onChange={(v) => setParams({ ...params, to: v })} />
+          <Input label={t('Date')} type="date" min={todayISO()} value={params.date} onChange={(e) => setParams({ ...params, date: e.target.value })} />
+          <Input label={t('Passengers')} type="number" min={1} value={params.passengers} onChange={(e) => setParams({ ...params, passengers: Number(e.target.value) || 1 })} />
         </div>
         <Button className="mt-4" icon={Search} disabled={!params.from || !params.to || !params.date} onClick={() => setSearch({ ...params })}>
-          Search buses
+          {t('Search buses')}
         </Button>
       </div>
 
@@ -40,8 +42,8 @@ export default function Buses() {
 
       {data && !data.isLive && (
         <ProviderNotice
-          title="Live bus data unavailable"
-          message={data.message || 'Bus provider not configured.'}
+          title={t('Live bus data unavailable')}
+          message={data.message || t('Bus provider not configured.')}
           externalSources={data.externalSources || [{ name: 'RedBus', url: 'https://www.redbus.in' }]}
         />
       )}
@@ -49,7 +51,7 @@ export default function Buses() {
       {data?.isLive && (
         <div className="space-y-3">
           <p className="text-xs font-semibold text-emerald-600">● Live schedules from configured provider</p>
-          {data.buses.length === 0 && <div className="card p-8 text-center text-sm text-slate-500">No buses found.</div>}
+          {data.buses.length === 0 && <div className="card p-8 text-center text-sm text-slate-500">{t('No buses found.')}</div>}
           {data.buses.map((b, i) => (
             <div key={i} className="card flex flex-wrap items-center gap-4 p-5">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-lime-50 text-lime-600 dark:bg-lime-950 dark:text-lime-400">

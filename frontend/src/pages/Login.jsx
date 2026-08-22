@@ -10,6 +10,7 @@ import { useAuthStore } from '../store/authStore';
 import { errorMessage } from '../services/api';
 import { Input } from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import { useI18n } from '../utils/i18n';
 import { Eye, EyeOff, Plane } from 'lucide-react';
 
 const schema = z.object({
@@ -18,6 +19,7 @@ const schema = z.object({
 });
 
 export default function Login() {
+  const { t } = useI18n();
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
@@ -31,7 +33,7 @@ export default function Login() {
     try {
       const { data } = await authApi.login(values);
       login({ user: data.data.user, accessToken: data.data.accessToken || null });
-      toast.success('Welcome back!');
+      toast.success(t('Welcome back!'));
       navigate('/dashboard');
     } catch (err) {
       toast.error(errorMessage(err, 'Login failed'));
@@ -46,12 +48,12 @@ export default function Login() {
       const idToken = await signInWithGoogle();
       const { data } = await authApi.firebaseToken(idToken);
       login({ user: data.data.user, accessToken: data.data.accessToken || null });
-      toast.success('Welcome back!');
+      toast.success(t('Welcome back!'));
       navigate('/dashboard');
     } catch (err) {
       // Silently reset when the user simply closes the Google popup.
       if (err?.code !== 'auth/popup-closed-by-user' && err?.code !== 'auth/cancelled-popup-request') {
-        toast.error(errorMessage(err, 'Google sign-in failed'));
+        toast.error(errorMessage(err, t('Google sign-in failed')));
       }
     } finally {
       setOauthLoading(false);
@@ -64,16 +66,16 @@ export default function Login() {
         <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-card">
           <Plane className="h-6 w-6" />
         </div>
-        <h1 className="text-xl font-extrabold text-slate-900 dark:text-white">Welcome back</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Sign in to plan your next trip</p>
+        <h1 className="text-xl font-extrabold text-slate-900 dark:text-white">{t('Welcome back')}</h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t('Sign in to plan your next trip')}</p>
       </div>
 
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-        <Input label="Email" type="email" placeholder="you@example.com" error={errors.email?.message} {...register('email')} />
+        <Input label={t('Email')} type="email" placeholder="you@example.com" error={errors.email?.message} {...register('email')} />
         <div className="relative">
           <Input
-            label="Password"
+            label={t('Password')}
             type={showPw ? 'text' : 'password'}
             placeholder="••••••••"
             error={errors.password?.message}
@@ -89,17 +91,17 @@ export default function Login() {
         </div>
         <div className="flex items-center justify-between text-sm">
           <Link to="/forgot-password" className="font-semibold text-brand-600 hover:underline dark:text-brand-400">
-            Forgot password?
+            {t('Forgot password?')}
           </Link>
         </div>
         <Button type="submit" loading={loading} className="w-full">
-          Sign in
+          {t('Sign in')}
         </Button>
       </form>
 
       <div className="my-5 flex items-center gap-3 text-xs text-slate-400">
         <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
-        or continue with
+        {t('or continue with')}
         <span className="h-px flex-1 bg-slate-200 dark:bg-slate-700" />
       </div>
 
@@ -110,13 +112,13 @@ export default function Login() {
           <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18A10.96 10.96 0 0 0 1 12c0 1.77.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
           <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
         </svg>
-        Continue with Google
+        {t('Continue with Google')}
       </Button>
 
       <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
-        New to TravelMind?{' '}
+        {t('New to TravelMind?')}{' '}
         <Link to="/register" className="font-bold text-brand-600 hover:underline dark:text-brand-400">
-          Create an account
+          {t('Create an account')}
         </Link>
       </p>
     </div>
