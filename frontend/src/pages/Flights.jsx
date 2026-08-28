@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Plane, Search, Clock, MapPin } from 'lucide-react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { Plane, Search, Clock, MapPin, ExternalLink, DollarSign } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import { Input, Select } from '../components/ui/Input';
 import PlaceAutocomplete from '../components/PlaceAutocomplete';
@@ -11,6 +11,7 @@ import { formatCurrency, todayISO } from '../utils/format';
 import { Spinner } from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
 import { useI18n } from '../utils/i18n';
+import toast from 'react-hot-toast';
 
 function flightsFromQuery() {
   const sp = new URLSearchParams(window.location.search);
@@ -26,10 +27,65 @@ function flightsFromQuery() {
   };
 }
 
+function BookingLinksButton({ ignavId }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['booking-links', ignavId],
+    queryFn: () => flightsApi.bookingLinks(ignavId).then((r) => r.data.data),
+    enabled: open && Boolean(ignavId),
+  });
+
+  if (!ignavId) return null;
+
+  return (
+    <div>
+      {!open ? (
+        <button onClick={() => setOpen(true)} className="text-xs font-bold text-brand-600 hover:underline dark:text-brand-400">
+          {t('Show booking links')} →
+        </button>
+      ) : isLoading ? (
+        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+          <Spinner size="sm" /> {t('Loading links…')}
+        </div>
+      ) : data?.links?.length > 0 ? (
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {data.links.slice(0, 4).map((link, i) => (
+            <a
+              key={i}
+              href={link.url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            >
+              <ExternalLink className="h-3 w-3" />
+              {link.provider}
+              {link.price?.amount && (
+                <span className="text-emerald-600 dark:text-emerald-400">
+                  {formatCurrency(link.price.amount, link.price.currency)}
+                </span>
+              )}
+            </a>
+          ))}
+        </div>
+      ) : (
+        <a
+          href="https://www.google.com/travel/flights"
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs font-bold text-brand-600 hover:underline dark:text-brand-400"
+        >
+          {t('Search on Google Flights')} →
+        </a>
+      )}
+    </div>
+  );
+}
+
 export default function Flights() {
   const { t } = useI18n();
   const [params, setParams] = useState(flightsFromQuery);
-  // Topbar search (?to=Goa) should auto-run the search on mount.
   const [search, setSearch] = useState(() => {
     const sp = new URLSearchParams(window.location.search);
     return sp.get('to') || sp.get('from') ? flightsFromQuery() : null;
@@ -46,9 +102,15 @@ export default function Flights() {
     setSearch({ ...params });
   };
 
+  const hasPrices = data?.flights?.some((f) => f.price?.amount);
+
   return (
     <div>
-      <PageHeader icon={Plane} title={t('Flights')} subtitle={t('Live flight data from AviationStack.')} />
+      <PageHeader
+        icon={Plane}
+        title={t('Flights')}
+        subtitle={hasPrices ? t('Real prices from Ignav with booking links.') : t('Live flight data with real-time tracking.')}
+      />
 
       <div className="card mb-6 p-5">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -73,16 +135,23 @@ export default function Flights() {
       {data && !data.isLive && (
         <ProviderNotice
           title={t('Live flight data unavailable')}
-          message={data.message || t('AviationStack is not returning live data. Check that AVIATIONSTACK_API_KEY is set in backend/.env and that your AviationStack plan quota has not been reached.')}
+          message={data.message || t('No flight API is returning live data. Set IGNAV_API_KEY (real prices) or AVIATIONSTACK_API_KEY in backend/.env.')}
           externalSources={[{ name: 'Google Flights', url: 'https://www.google.com/travel/flights' }, { name: 'Skyscanner', url: 'https://www.skyscanner.net' }]}
         />
       )}
 
       {data?.isLive && (
         <div className="space-y-3">
-          <p className="text-xs font-semibold text-emerald-600">
-            ● {t('Live from')} {data.provider === 'aviationstack-flights' ? 'AviationStack' : data.provider}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold text-emerald-600">
+              ● {t('Live from')} {data.provider === 'ignav-flights' ? 'Ignav' : data.provider === 'aviationstack-flights' ? 'AviationStack' : data.provider}
+            </p>
+            {hasPrices && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                <DollarSign className="h-3 w-3" /> {t('Real prices')}
+              </span>
+            )}
+          </div>
           {data.message && (
             <p className="text-xs text-slate-500 dark:text-slate-400">{data.message}</p>
           )}
@@ -102,6 +171,11 @@ export default function Flights() {
                     <p className="text-xs text-slate-500">
                       {f.origin} → {f.destination}{f.duration ? ` · ${f.duration}` : ''}
                     </p>
+                    {f.segments && f.segments.length > 1 && (
+                      <p className="text-xs text-slate-400">
+                        {f.segments.map((s) => `${s.from}→${s.to}`).join(' · ')}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-4 text-sm">
@@ -111,13 +185,20 @@ export default function Flights() {
                   </span>
                   <Badge tone={f.stops === 0 ? 'green' : 'amber'}>{f.stops === 0 ? t('Non-stop') : `${f.stops} ${t('stop(s)')}`}</Badge>
                 </div>
-                <div className="text-right">
-                  <p className="text-lg font-extrabold text-slate-900 dark:text-white">
-                    {f.price?.amount ? formatCurrency(f.price.amount, f.price.currency) : t('Price on request')}
-                  </p>
-                  <a href={f.bookingUrl} target="_blank" rel="noreferrer" className="text-xs font-bold text-brand-600 hover:underline dark:text-brand-400">
-                    {t('View on provider')} →
-                  </a>
+                <div className="text-right min-w-[120px]">
+                  {f.price?.amount ? (
+                    <>
+                      <p className="text-lg font-extrabold text-slate-900 dark:text-white">
+                        {formatCurrency(f.price.amount, f.price.currency)}
+                      </p>
+                      {f.price.perPerson && (
+                        <p className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">{t('per person')}</p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-sm text-slate-400">{t('Price on request')}</p>
+                  )}
+                  <BookingLinksButton ignavId={f.ignavId} />
                 </div>
               </div>
             ))

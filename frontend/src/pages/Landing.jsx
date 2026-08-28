@@ -70,7 +70,7 @@ export default function Landing() {
               <Sparkles className="h-3.5 w-3.5" /> {t('Multi-Agent LLM Architecture · Real Data · Real Auth')}
             </span>
             <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-extrabold leading-tight tracking-tight text-slate-900 dark:text-white sm:text-6xl">
-              {t('Plan smarter trips with')} <span className="text-gradient">{t('17 AI agents')}</span> {t('working for you')}
+              {t('Plan smarter trips with')} <span className="text-gradient">{t('AI agents')}</span> {t('working for you')}
             </h1>
             <p className="mx-auto mt-5 max-w-2xl text-base text-slate-600 dark:text-slate-300 sm:text-lg">
               {t('landingHeroDesc')}

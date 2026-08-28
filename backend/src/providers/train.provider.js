@@ -1,5 +1,6 @@
 import env from '../config/env.js';
 import { live, unavailable, axiosPost, axiosGet, providerBaseUrl, providerHeaders } from './base.provider.js';
+import logger from '../utils/logger.js';
 
 /**
  * Train provider - connects to a configured legitimate train API
@@ -221,6 +222,8 @@ function normalizeTrain(t, i) {
  * Accepts city names OR station codes (NGP, CSTM) - IRCTC codes resolve live.
  */
 export async function searchTrains({ from, to, date, passengers = 1, trainClass }) {
+  logger.entry('[PROVIDER:train]', 'searchTrains', { from, to, date, passengers, trainClass });
+  const started = Date.now();
   const base = providerBaseUrl(env.TRAIN_API_URL);
   if (!base) {
     return unavailable(
@@ -251,7 +254,9 @@ export async function searchTrains({ from, to, date, passengers = 1, trainClass 
         const upstream = typeof data?.message === 'string' ? data.message : JSON.stringify(data?.error || data)?.slice(0, 300);
         return unavailable('train', `Train provider replied: ${upstream || 'no train data returned'}.`);
       }
-      const result = live('train', list.map(normalizeTrain).filter(Boolean), 'Live train schedules from configured provider');
+      const normalized = list.map(normalizeTrain).filter(Boolean);
+      logger.provider('irctc-train', 'searchTrains', { isLive: true, count: normalized.length, latencyMs: Date.now() - started });
+      const result = live('train', normalized, 'Live train schedules from configured provider');
       cacheSet(cacheKey, result);
       return result;
     }
@@ -276,7 +281,9 @@ export async function searchTrains({ from, to, date, passengers = 1, trainClass 
         `Train provider replied: ${upstream}. If this is a RapidAPI host, open the API on rapidapi.com → Endpoints and set TRAIN_API_ENDPOINT to the exact search path (e.g. /api/v2/getTrainBetweenStations).`
       );
     }
-    return live('train', list.map(normalizeTrain).filter(Boolean), 'Live train schedules from configured provider');
+    const normalized = list.map(normalizeTrain).filter(Boolean);
+    logger.provider('generic-train', 'searchTrains', { isLive: true, count: normalized.length, latencyMs: Date.now() - started });
+    return live('train', normalized, 'Live train schedules from configured provider');
   } catch (err) {
     if (err.response?.status === 429) {
       return unavailable(

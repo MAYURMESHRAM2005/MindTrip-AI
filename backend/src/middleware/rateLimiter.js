@@ -1,5 +1,6 @@
 import rateLimit from 'express-rate-limit';
 import ApiError from '../utils/ApiError.js';
+import logger from '../utils/logger.js';
 
 /**
  * General API limiter.
@@ -11,6 +12,7 @@ export const apiLimiter = rateLimit({
   legacyHeaders: false,
   message: 'Too many requests, please try again later.',
   handler: (req, res) => {
+    logger.warn(`[RATE_LIMIT] General API limit hit: ${req.method} ${req.originalUrl} from ${req.ip}`);
     res.status(429).json({
       success: false,
       statusCode: 429,
@@ -29,6 +31,7 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   message: 'Too many login attempts, please try again later.',
   handler: (req, res) => {
+    logger.warn(`[RATE_LIMIT] Auth limit hit: ${req.method} ${req.originalUrl} from ${req.ip}`);
     res.status(429).json({
       success: false,
       statusCode: 429,
@@ -46,6 +49,7 @@ export const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
+    logger.warn(`[RATE_LIMIT] AI endpoint limit hit: ${req.method} ${req.originalUrl} from ${req.ip}`);
     res.status(429).json({
       success: false,
       statusCode: 429,

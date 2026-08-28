@@ -13,10 +13,13 @@ const tripSchema = new mongoose.Schema(
     travelers: {
       adults: { type: Number, default: 1, min: 1, max: 20 },
       children: { type: Number, default: 0, min: 0, max: 20 },
+      numTravelers: { type: Number, default: 1, min: 1, max: 50 },
+      travelerType: { type: String, enum: ['solo', 'couple', 'family', 'friends', 'business'], default: 'solo' },
     },
     budget: {
       total: { type: Number, required: true, min: 0 },
       currency: { type: String, enum: CURRENCIES, default: 'INR' },
+      accommodationType: { type: String, enum: ['budget', 'standard', 'luxury', 'hostel', 'boutique', 'resort', 'homestay'], default: 'budget' },
     },
     preferences: {
       travelStyle: { type: String, enum: TRAVEL_STYLES, default: 'standard' },

@@ -1,23 +1,19 @@
-import { BaseAgent } from './base.agent.js';
-import { FINAL_VALIDATOR_PROMPT } from '../prompts/agentPrompts.js';
-
 /**
  * Final Validator Agent: runs the mandatory checklist.
- *
- * Deterministic checks run first (code, always available):
- *  - total cost <= budget
- *  - dates consistent
- *  - activities do not overlap in time
- *  - hotels/transport/restaurants match expectations
- *  - estimates / live data correctly labelled
- *
- * Gemini then performs a qualitative review on top of those findings.
+ * Now purely deterministic — no Gemini calls. The deterministic checks
+ * (budget, dates, overlaps, labelling) run in code; AI review is removed
+ * since the itinerary builder already enforces budget constraints.
  */
-class FinalValidatorAgent extends BaseAgent {
+import logger from '../utils/logger.js';
+
+class FinalValidatorAgent {
   constructor() {
-    super('finalValidator');
-    this.systemPrompt = FINAL_VALIDATOR_PROMPT;
+    this.name = 'finalValidator';
+    this._systemPrompt = '';
   }
+
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
 
   _timeToMinutes(t) {
     if (!t || !t.includes(':')) return null;
@@ -30,7 +26,7 @@ class FinalValidatorAgent extends BaseAgent {
     const issues = [];
     const warnings = [];
 
-    // 1. Budget
+    // 1. Budget check
     if (totalEstimatedCost > budget) {
       issues.push(`Estimated cost (${totalEstimatedCost}) exceeds budget (${budget})`);
     }
@@ -38,7 +34,7 @@ class FinalValidatorAgent extends BaseAgent {
     // 1b. Duplicate places / restaurants / costs across days
     const seenAttractions = new Map();
     const seenRestaurants = new Map();
-    const attractionCosts = new Map(); // amount -> Set of attraction titles
+    const attractionCosts = new Map();
     const duplicatePlaces = [];
     const duplicateRestaurants = [];
     let duplicateCosts = 0;
@@ -61,8 +57,6 @@ class FinalValidatorAgent extends BaseAgent {
             seenRestaurants.set(name, day.dayNumber);
           }
         }
-        // Duplicate-cost check is scoped to attractions/activities only, so
-        // shared meal price levels never produce false positives.
         const amt = act.cost?.amount;
         if ((act.category === 'attraction' || act.category === 'activity') && typeof amt === 'number' && amt > 0) {
           if (!attractionCosts.has(amt)) attractionCosts.set(amt, new Set());
@@ -82,7 +76,6 @@ class FinalValidatorAgent extends BaseAgent {
     if (duplicateCosts > 0) {
       warnings.push(`${duplicateCosts} activity cost(s) identical across different items - verify estimates`);
     }
-    const duplicatesFound = duplicatePlaces.length > 0 || duplicateRestaurants.length > 0 || duplicateCosts > 0;
 
     // 2. Dates consistency
     for (const day of days || []) {
@@ -94,10 +87,7 @@ class FinalValidatorAgent extends BaseAgent {
       }
     }
 
-    // 3. Overlaps - duration-aware. Two activities only conflict when their
-    //    estimated time windows actually intersect (10-min buffer). Hotel
-    //    check-in / checkout / overnight entries are administrative markers
-    //    and are not scheduled blocks, so they never trigger overlaps.
+    // 3. Overlaps - duration-aware
     const DURATION_MIN = {
       transport: 30, flight: 30, train: 30, bus: 30,
       restaurant: 60, attraction: 120, activity: 90,
@@ -111,7 +101,7 @@ class FinalValidatorAgent extends BaseAgent {
         const start = this._timeToMinutes(act.time);
         if (start === null) continue;
         const duration = DURATION_MIN[act.category] ?? 45;
-        if (duration <= 0) continue; // marker entry - not a scheduled block
+        if (duration <= 0) continue;
         const end = start + duration;
         for (const b of blocks) {
           if (start < b.end - OVERLAP_BUFFER && b.start < end - OVERLAP_BUFFER) {
@@ -149,8 +139,10 @@ class FinalValidatorAgent extends BaseAgent {
     const estimates = days?.flatMap((d) => d.activities).filter((a) => a.cost?.isEstimate === true) || [];
     if (estimates.length) warnings.push(`${estimates.length} costs are estimates (flagged)`);
 
+    const passed = issues.length === 0;
+
     return {
-      passed: issues.length === 0,
+      passed,
       issues,
       warnings,
       summary: issues.length
@@ -160,61 +152,33 @@ class FinalValidatorAgent extends BaseAgent {
       duplicatePlaces,
       duplicateRestaurants,
       duplicateCosts,
-      duplicatesFound,
+      duplicatesFound: duplicatePlaces.length > 0 || duplicateRestaurants.length > 0 || duplicateCosts > 0,
     };
   }
 
   async run({ days, budget, totalEstimatedCost, destination, origin, prefs, userId }) {
+    logger.entry('[AGENT:finalValidator]', 'run', { dayCount: days?.length || 0, budget, totalEstimatedCost, destination });
     const deterministic = this.runDeterministic({ days, budget, totalEstimatedCost, destination, origin, prefs });
-
-    // Qualitative AI review on top of the deterministic result
-    const aiResult = await this.think({
-      prompt: `Review this itinerary summary:
-Destination: ${destination}
-Origin: ${origin}
-Budget: ${budget}
-Estimated cost: ${totalEstimatedCost}
-Deterministic findings: ${JSON.stringify(deterministic)}
-${JSON.stringify((days || []).map((d) => ({ day: d.dayNumber, activities: (d.activities || []).map((a) => a.title + ' @ ' + a.time) })), null, 2)}
-Report any additional realism issues.`,
-      userId,
-      action: 'validate',
-    });
-
-    if (aiResult.status === 'success' && aiResult.data) {
-      const ai = aiResult.data;
-      // Overlap detection is exclusively the deterministic check's domain
-      // (duration-aware). The AI review only sees a compressed schedule
-      // summary, so it can hallucinate overlaps (e.g. 19:15 transport vs
-      // 20:00 dinner) that would turn a fine itinerary into a false failure.
-      // Only the deterministic overlap format is suppressed - genuine
-      // qualitative conflicts the AI identifies are still surfaced.
-      const aiIssues = (ai.issues || []).filter(
-        (i) => !/overlaps\s+"/i.test(String(i))
-      );
-      return {
-        agent: this.name,
-        status: ai.passed ? 'success' : 'degraded',
-        data: {
-          ...deterministic,
-          aiReview: ai.summary || '',
-          issues: [...new Set([...deterministic.issues, ...aiIssues])],
-          warnings: [...new Set([...deterministic.warnings, ...(ai.warnings || [])])],
-          passed: deterministic.issues.length === 0 && aiIssues.length === 0,
-        },
-        message: 'Validated by Final Validator Agent',
-        usedAI: true,
-        source: 'ai',
-      };
-    }
+    logger.exit('[AGENT:finalValidator]', 'run', { status: deterministic.passed ? 'success' : 'degraded', issues: deterministic.issues.length, warnings: deterministic.warnings.length, passed: deterministic.passed, duplicatesFound: deterministic.duplicatesFound });
 
     return {
       agent: this.name,
       status: deterministic.passed ? 'success' : 'degraded',
-      data: { ...deterministic, aiReview: 'AI review unavailable - deterministic checks passed' },
-      message: 'Validated by deterministic checks (AI unavailable)',
+      data: { ...deterministic, aiReview: 'Deterministic validation only — AI review removed for performance' },
+      message: `Validated by deterministic checks (${deterministic.issues.length} issues, ${deterministic.warnings.length} warnings)`,
+      latencyMs: 0,
       usedAI: false,
       source: 'deterministic',
+    };
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
     };
   }
 }

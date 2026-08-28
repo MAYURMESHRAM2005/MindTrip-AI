@@ -12,18 +12,24 @@ let refreshPromise = null;
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().accessToken;
   if (token) config.headers.Authorization = `Bearer ${token}`;
+  console.log(`[API] → ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`, config.params || config.data || '');
   return config;
 });
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    console.log(`[API] ← ${res.config.method?.toUpperCase()} ${res.config.url} [${res.status}]`, res.data?.message || '');
+    return res;
+  },
   async (error) => {
     const original = error.config;
     const status = error.response?.status;
 
     // Silent 401 for the refresh/me endpoints to avoid loops
     const isAuthCall = original?.url?.includes('/auth/');
+    console.warn(`[API] ← ${original?.method?.toUpperCase()} ${original?.url} [${status}]`, error.message);
     if (status === 401 && !original._retry && !isAuthCall) {
+      console.log('[API] Token expired, attempting refresh...');
       original._retry = true;
       try {
         if (!refreshPromise) {
@@ -40,10 +46,12 @@ api.interceptors.response.use(
         }
         const newToken = await refreshPromise;
         if (newToken) {
+          console.log('[API] Token refreshed successfully, retrying request...');
           original.headers.Authorization = `Bearer ${newToken}`;
           return api(original);
         }
-      } catch {
+      } catch (refreshErr) {
+        console.warn('[API] Token refresh failed, logging out:', refreshErr.message);
         // Session expired - clear and redirect to login
         useAuthStore.getState().logout();
         if (window.location.pathname !== '/login') {

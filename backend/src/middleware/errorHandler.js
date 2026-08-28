@@ -7,6 +7,7 @@ import env, { isProduction } from '../config/env.js';
  * Never leak internal stack traces in production.
  */
 export function notFoundHandler(req, _res, next) {
+  logger.warn(`[HTTP] 404 Not Found: ${req.method} ${req.originalUrl}`);
   next(ApiError.notFound(`Route not found: ${req.method} ${req.originalUrl}`));
 }
 
@@ -33,7 +34,8 @@ export function errorHandler(err, req, res, _next) {
     }
   }
 
-  if (error.statusCode >= 500) logger.error('[ERROR]', error);
+  if (error.statusCode >= 500) logger.error('[HTTP] 500 Internal Server Error:', error.message, error.stack?.slice(0, 200));
+  else if (error.statusCode >= 400) logger.warn(`[HTTP] ${error.statusCode} Client Error: ${error.message}`);
 
   const statusCode = error.statusCode || 500;
   const body = {

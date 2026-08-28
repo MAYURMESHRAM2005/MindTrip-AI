@@ -1,18 +1,23 @@
-import { BaseAgent } from './base.agent.js';
-import { RESTAURANT_AGENT_PROMPT } from '../prompts/agentPrompts.js';
 import placesProvider from '../providers/places.provider.js';
+import logger from '../utils/logger.js';
 
 /**
- * Restaurant Agent: real Geoapify Places results first; Gemini builds a meal
- * plan from the provided list only.
+ * Restaurant Agent: real Geoapify Places results.
+ * Now purely provider-based — no Gemini calls. Restaurants are returned
+ * directly from the provider, sorted by relevance.
  */
-class RestaurantAgent extends BaseAgent {
+class RestaurantAgent {
   constructor() {
-    super('restaurant');
-    this.systemPrompt = RESTAURANT_AGENT_PROMPT;
+    this.name = 'restaurant';
+    this._systemPrompt = '';
   }
 
-  async run({ destination, foodPreference, userId }) {
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
+
+  async run({ destination, foodPreference }) {
+    logger.entry('[AGENT:restaurant]', 'run', { destination, foodPreference });
+    const started = Date.now();
     const providerResult = await placesProvider.textSearch({
       query: `${destination} best restaurants`,
       type: 'restaurant',
@@ -25,33 +30,50 @@ class RestaurantAgent extends BaseAgent {
         status: 'degraded',
         data: { restaurants: [], recommendations: [], isLive: false, message: providerResult.message },
         message: providerResult.message,
+        latencyMs: 0,
         usedAI: false,
         source: 'provider',
       };
     }
 
-    const result = await this.think({
-      prompt: `Destination: ${destination}
-Food preference: ${foodPreference || 'any'}
-Real restaurant data from Geoapify Places:
-${JSON.stringify(providerResult.data, null, 2)}
-Recommend restaurants matching the preference from this list only.`,
-      userId,
-      action: 'restaurantRecommend',
-      data: { restaurants: providerResult.data },
-    });
+    const restaurants = providerResult.data || [];
+    logger.info(`[AGENT:restaurant] Got ${restaurants.length} restaurants from Geoapify`);
 
-    if (result.status === 'success') {
-      result.data = { ...result.data, restaurants: providerResult.data, isLive: true };
-    } else {
-      result.status = 'degraded';
-      result.data = {
-        restaurants: providerResult.data,
-        recommendations: providerResult.data.slice(0, 4).map((r) => ({ name: r.name, rating: r.rating, priceLevel: r.priceLevel })),
+    // Deterministic: return restaurants directly, create simple recommendations
+    const recommendations = restaurants.slice(0, 6).map((r) => ({
+      name: r.name,
+      rating: r.rating,
+      priceLevel: r.priceLevel,
+      address: r.address,
+      types: r.types,
+    }));
+
+    logger.exit('[AGENT:restaurant]', 'run', { status: 'success', count: restaurants.length, latencyMs: Date.now() - started });
+    return {
+      agent: this.name,
+      status: 'success',
+      data: {
+        restaurants,
+        recommendations,
         isLive: true,
-      };
-    }
-    return result;
+        mealPlan: [],
+        notes: `Restaurant data from Geoapify (${restaurants.length} options)`,
+      },
+      message: `Restaurant data from provider (${restaurants.length} options)`,
+      latencyMs: Date.now() - started,
+      usedAI: false,
+      source: 'provider',
+    };
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

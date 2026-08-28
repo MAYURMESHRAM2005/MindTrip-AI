@@ -114,7 +114,7 @@ export default function Dashboard() {
               { to: latest ? `/itinerary/${latest._id}` : '/itinerary', icon: CalendarDays, label: t('View latest itinerary'), desc: latest ? latest.title : t('No trip yet') },
               { to: '/budget', icon: Wallet, label: t('Optimize budget'), desc: t('Cheaper alternatives') },
               { to: '/chat', icon: Bot, label: t('Ask the AI chatbot'), desc: t('Contextual assistance') },
-              { to: '/agents', icon: TrendingUp, label: t('Agent pipeline'), desc: t('17 agents explained') },
+              { to: '/agents', icon: TrendingUp, label: t('Agent pipeline'), desc: t('Agents explained') },
             ].map((a) => (
               <Link key={a.label} to={a.to} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800">
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">

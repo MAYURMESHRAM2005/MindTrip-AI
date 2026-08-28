@@ -11,10 +11,13 @@ export const generateTripSchema = Joi.object({
   endDate: dateSchema.required(),
   adults: Joi.number().integer().min(1).max(20).default(1),
   children: Joi.number().integer().min(0).max(20).default(0),
+  numTravelers: Joi.number().integer().min(1).max(50).default(1),
+  travelerType: Joi.string().valid('solo', 'couple', 'family', 'friends', 'business').default('solo'),
   totalBudget: Joi.number().positive().max(1e9).required(),
   currency: Joi.string()
     .valid(...CURRENCIES)
     .default('INR'),
+  accommodationType: Joi.string().valid('budget', 'standard', 'luxury', 'hostel', 'boutique', 'resort', 'homestay').default('budget'),
   travelStyle: Joi.string()
     .valid(...TRAVEL_STYLES)
     .default('standard'),

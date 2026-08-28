@@ -1,19 +1,23 @@
-import { BaseAgent } from './base.agent.js';
-import { WEATHER_AGENT_PROMPT } from '../prompts/agentPrompts.js';
 import weatherProvider from '../providers/weather.provider.js';
+import logger from '../utils/logger.js';
 
 /**
- * Fetches real weather FIRST (forecast + current, for sunrise/sunset), then
- * lets Gemini advise on how to adapt the itinerary. When the provider or AI
- * is unavailable the result degrades gracefully - never invented weather.
+ * Weather Agent: real OpenWeatherMap forecast + current weather.
+ * Now purely provider-based — no Gemini calls. Weather data is returned
+ * directly from the provider with a deterministic summary.
  */
-class WeatherAgent extends BaseAgent {
+class WeatherAgent {
   constructor() {
-    super('weather');
-    this.systemPrompt = WEATHER_AGENT_PROMPT;
+    this.name = 'weather';
+    this._systemPrompt = '';
   }
 
-  async run({ destination, startDate, endDate, userId }) {
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
+
+  async run({ destination, startDate, endDate }) {
+    logger.entry('[AGENT:weather]', 'run', { destination, startDate, endDate });
+    const started = Date.now();
     const [providerResult, currentResult] = await Promise.all([
       weatherProvider.forecast({ city: destination }),
       weatherProvider.currentWeather({ city: destination }),
@@ -27,46 +31,80 @@ class WeatherAgent extends BaseAgent {
     };
 
     if (!providerResult.isLive) {
+      logger.warn(`[AGENT:weather] Provider not live: ${providerResult.message}`);
       return {
         agent: this.name,
         status: 'degraded',
         data: {
           ...base,
-          summary: 'Weather forecast unavailable - plan flexible indoor/outdoor options.',
+          summary: 'Weather forecast unavailable — plan flexible indoor/outdoor options.',
           advice: [],
           packing: [],
           warnings: [],
         },
         message: providerResult.message,
+        latencyMs: 0,
         usedAI: false,
         source: 'provider',
       };
     }
 
-    const result = await this.think({
-      prompt: `Destination: ${destination}
-Trip dates: ${startDate} to ${endDate}
-Real forecast data:
-${JSON.stringify(providerResult.data, null, 2)}
-Advise per-day adjustments, packing and warnings based ONLY on this data.`,
-      userId,
-      action: 'weatherAdvice',
-      data: base,
-    });
+    // Deterministic summary from forecast data
+    const forecast = providerResult.data || [];
+    const hasRain = forecast.some((f) => f.rainProbability >= 50);
+    const maxTemp = Math.max(...forecast.map((f) => f.tempMax ?? 0));
+    const minTemp = Math.min(...forecast.map((f) => f.tempMin ?? 100));
 
-    if (result.status === 'success') {
-      result.data = { ...result.data, provider: 'live', providerMessage: providerResult.message, forecast: providerResult.data };
-    } else {
-      result.status = 'degraded';
-      result.data = {
-        ...base,
-        summary: 'Live forecast retrieved; AI advice unavailable.',
-        perDay: [],
-        packing: [],
-        warnings: [],
-      };
+    const advice = [];
+    const packing = [];
+    const warnings = [];
+
+    if (hasRain) {
+      advice.push('Rain expected on some days — carry an umbrella and plan indoor alternatives');
+      packing.push('Umbrella or rain jacket');
+      warnings.push('Heavy rain possible — check local conditions before outdoor activities');
     }
-    return result;
+    if (maxTemp > 35) {
+      advice.push('High temperatures expected — stay hydrated and avoid midday sun');
+      packing.push('Sunscreen, hat, and water bottle');
+    }
+    if (minTemp < 10) {
+      advice.push('Cool mornings — layer up for early activities');
+      packing.push('Light jacket or sweater');
+    }
+    packing.push('Comfortable walking shoes');
+    packing.push('Reusable water bottle');
+
+    const summary = `Weather for ${destination}: ${forecast.length} days forecast available. ` +
+      `Temperature range: ${minTemp}°C – ${maxTemp}°C. ` +
+      (hasRain ? 'Rain expected on some days.' : 'Mostly clear conditions expected.');
+
+    logger.exit('[AGENT:weather]', 'run', { status: 'success', forecastDays: forecast.length, hasRain, maxTemp, minTemp, latencyMs: Date.now() - started });
+    return {
+      agent: this.name,
+      status: 'success',
+      data: {
+        ...base,
+        summary,
+        advice,
+        packing,
+        warnings,
+      },
+      message: `Weather data from OpenWeatherMap (${forecast.length} days)`,
+      latencyMs: Date.now() - started,
+      usedAI: false,
+      source: 'provider',
+    };
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

@@ -1,39 +1,56 @@
-import { BaseAgent } from './base.agent.js';
-import { SAFETY_AGENT_PROMPT } from '../prompts/agentPrompts.js';
-
 /**
- * Safety Agent: practical guidance. Deliberately does NOT invent emergency
- * phone numbers - it points users to the Emergency Center instead.
+ * Safety Agent: practical safety guidance using general knowledge.
+ * Now purely deterministic — no Gemini calls.
  */
-class SafetyAgent extends BaseAgent {
+import logger from '../utils/logger.js';
+
+class SafetyAgent {
   constructor() {
-    super('safety');
-    this.systemPrompt = SAFETY_AGENT_PROMPT;
+    this.name = 'safety';
+    this._systemPrompt = '';
   }
 
-  async run({ destination, userId }) {
-    const result = await this.think({
-      prompt: `Destination: ${destination}
-Provide practical safety tips for this destination. Do not invent emergency phone numbers; tell the user to check the Emergency Center for verified contacts.`,
-      userId,
-      action: 'safety',
-    });
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
 
-    if (result.status !== 'success') {
-      result.status = 'degraded';
-      result.data = {
+  async run({ destination }) {
+    logger.entry('[AGENT:safety]', 'run', { destination });
+    const result = {
+      agent: this.name,
+      status: 'success',
+      data: {
         safetyTips: [
           'Save your hotel address and share it with someone you trust',
           'Use the Emergency Center page for nearby hospitals, police and pharmacies',
           'Keep digital and physical copies of important documents',
+          'Use registered taxis or ride-sharing apps for transport',
+          'Keep valuables in a secure bag and be aware of your surroundings',
         ],
-        scamAlerts: [],
-        healthNotes: 'Drink bottled water and check local health advisories.',
-        emergencyAdvice: 'Use the Emergency Center for verified contacts',
-        insuranceAdvice: 'Consider travel insurance covering medical emergencies.',
-      };
-    }
+        scamAlerts: [
+          'Be cautious of unlicensed tour guides offering unsolicited help',
+          'Verify prices before accepting services from street vendors',
+        ],
+        healthNotes: 'Drink bottled water and check local health advisories before traveling.',
+        emergencyAdvice: 'Use the Emergency Center for verified contacts — do not rely on unofficial sources',
+        insuranceAdvice: 'Consider travel insurance covering medical emergencies and trip cancellation.',
+      },
+      message: 'Safety guidance generated from general knowledge',
+      latencyMs: 0,
+      usedAI: false,
+      source: 'deterministic',
+    };
+    logger.exit('[AGENT:safety]', 'run', { status: 'success', safetyTips: result.data.safetyTips.length, scamAlerts: result.data.scamAlerts.length });
     return result;
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

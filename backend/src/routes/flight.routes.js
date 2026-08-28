@@ -8,5 +8,6 @@ const router = Router();
 router.use(protect);
 
 router.get('/search', validate(flightSearchSchema, 'query'), flightController.searchFlights);
+router.post('/booking-links', flightController.bookingLinks);
 
 export default router;

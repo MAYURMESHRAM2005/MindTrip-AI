@@ -1,5 +1,6 @@
 import env from '../config/env.js';
 import { live, unavailable, axiosGet } from './base.provider.js';
+import logger from '../utils/logger.js';
 
 const BASE = 'https://api.openweathermap.org/data/2.5';
 
@@ -33,6 +34,8 @@ function mapCurrent(d) {
 }
 
 export async function currentWeather({ city, lat, lng, units = 'metric' }) {
+  logger.entry('[PROVIDER:weather]', 'currentWeather', { city, lat, lng });
+  const started = Date.now();
   if (!env.OPENWEATHER_API_KEY) {
     return unavailable('openweather', 'OpenWeather API key not configured');
   }
@@ -44,13 +47,17 @@ export async function currentWeather({ city, lat, lng, units = 'metric' }) {
     if (data.cod !== 200) {
       return unavailable('openweather', `Weather lookup failed: ${data.message || data.cod}`);
     }
+    logger.provider('openweather', 'currentWeather', { isLive: true, latencyMs: Date.now() - started, temp: data.main?.temp });
     return live('openweather', mapCurrent(data), 'Live weather from OpenWeatherMap');
   } catch (err) {
+    logger.error(`[PROVIDER:weather] currentWeather error: ${err.message}`);
     return unavailable('openweather', `Live data unavailable: ${err.message}`);
   }
 }
 
 export async function forecast({ city, lat, lng, units = 'metric', days = 7 }) {
+  logger.entry('[PROVIDER:weather]', 'forecast', { city, lat, lng, days });
+  const started = Date.now();
   if (!env.OPENWEATHER_API_KEY) {
     return unavailable('openweather', 'OpenWeather API key not configured');
   }
@@ -86,12 +93,15 @@ export async function forecast({ city, lat, lng, units = 'metric', days = 7 }) {
         d.entries += 1;
       }
     }
+    const forecastData = Object.values(byDay).slice(0, days).map(({ entries, ...rest }) => rest);
+    logger.provider('openweather', 'forecast', { isLive: true, count: forecastData.length, latencyMs: Date.now() - started });
     return live(
       'openweather',
-      Object.values(byDay).slice(0, days).map(({ entries, ...rest }) => rest),
+      forecastData,
       'Live forecast from OpenWeatherMap'
     );
   } catch (err) {
+    logger.error(`[PROVIDER:weather] forecast error: ${err.message}`);
     return unavailable('openweather', `Live data unavailable: ${err.message}`);
   }
 }

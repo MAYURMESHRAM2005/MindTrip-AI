@@ -1,5 +1,6 @@
 import env from '../config/env.js';
 import { live, unavailable, axiosGet } from './base.provider.js';
+import logger from '../utils/logger.js';
 
 /**
  * Geoapify Places provider.
@@ -42,6 +43,7 @@ function mapResult(f) {
     name: p.name || '',
     address: p.formatted || p.address_line1 || '',
     coordinates: lat != null && lng != null ? { lat, lng } : null,
+    phone: p.phone || p.contact?.phone || p.housenumber || null,
     rating: null,
     userRatingsTotal: null,
     priceLevel: null,
@@ -73,6 +75,8 @@ async function apiGet(url, params) {
  * falls back to amenity geocoding for text-only queries.
  */
 export async function textSearch({ query, lat, lng, radius = 5000, type = 'tourist_attraction', limit = 10 }) {
+  logger.entry('[PROVIDER:places]', 'textSearch', { query, type, limit, hasCoords: lat != null && lng != null });
+  const started = Date.now();
   if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
 
   // Places API first. Errors and empty results both fall through to the
@@ -97,7 +101,9 @@ export async function textSearch({ query, lat, lng, radius = 5000, type = 'touri
   }
 
   if (features.length) {
-    return live('geoapify', features.slice(0, limit).map(mapResult), 'Live data from Geoapify');
+    const results = features.slice(0, limit).map(mapResult);
+    logger.provider('geoapify', 'textSearch', { isLive: true, count: results.length, latencyMs: Date.now() - started });
+    return live('geoapify', results, 'Live data from Geoapify');
   }
 
   // Text-only fallback: geocode the query as an amenity (e.g. "restaurants in Goa")
@@ -113,9 +119,7 @@ export async function textSearch({ query, lat, lng, radius = 5000, type = 'touri
     if (!results.length) {
       return unavailable('geoapify', `Places search failed: no results for "${query}"`);
     }
-    return live(
-      'geoapify',
-      results.slice(0, limit).map((r) => ({
+    const fallbackResults = results.slice(0, limit).map((r) => ({
         placeId: r.place_id || '',
         name: r.name || r.formatted || '',
         address: r.formatted || '',
@@ -130,16 +134,23 @@ export async function textSearch({ query, lat, lng, radius = 5000, type = 'touri
         businessStatus: '',
         url: '',
         website: '',
-      })),
+    }));
+    logger.provider('geoapify', 'textSearch (fallback geocode)', { isLive: true, count: fallbackResults.length, latencyMs: Date.now() - started });
+    return live(
+      'geoapify',
+      fallbackResults,
       'Live data from Geoapify'
     );
   } catch (err) {
+    logger.error(`[PROVIDER:places] textSearch error: ${err.message}`);
     return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }
 
 /** Nearby search — hospitals, police, ATMs, pharmacies, transit near a point. */
 export async function nearbySearch({ lat, lng, type = 'hospital', radius = 5000, limit = 12 }) {
+  logger.entry('[PROVIDER:places]', 'nearbySearch', { type, radius, limit, lat, lng });
+  const started = Date.now();
   if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
   try {
     if (lat == null || lng == null) {
@@ -154,21 +165,28 @@ export async function nearbySearch({ lat, lng, type = 'hospital', radius = 5000,
       format: 'json',
     });
     const features = data?.features || [];
-    return live('geoapify', features.slice(0, limit).map(mapResult), 'Live data from Geoapify');
+    const results = features.slice(0, limit).map(mapResult);
+    logger.provider('geoapify', 'nearbySearch', { isLive: true, count: results.length, latencyMs: Date.now() - started });
+    return live('geoapify', results, 'Live data from Geoapify');
   } catch (err) {
+    logger.error(`[PROVIDER:places] nearbySearch error: ${err.message}`);
     return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }
 
 export async function placeDetails(placeId) {
+  logger.entry('[PROVIDER:places]', 'placeDetails', { placeId });
+  const started = Date.now();
   if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
   try {
     const data = await apiGet(DETAILS_URL, { id: placeId, lang: 'en', format: 'json' });
     if (!data?.features?.[0]) {
       return unavailable('geoapify', `Place details failed: ${data?.error || 'not found'}`);
     }
+    logger.provider('geoapify', 'placeDetails', { isLive: true, latencyMs: Date.now() - started });
     return live('geoapify', mapResult(data.features[0]));
   } catch (err) {
+    logger.error(`[PROVIDER:places] placeDetails error: ${err.message}`);
     return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }

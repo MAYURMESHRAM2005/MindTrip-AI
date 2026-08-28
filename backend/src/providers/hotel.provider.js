@@ -1,5 +1,6 @@
 import env from '../config/env.js';
 import { live, unavailable, axiosPost, axiosGet } from './base.provider.js';
+import logger from '../utils/logger.js';
 
 let cachedToken = null;
 let cachedTokenExpiry = 0;
@@ -28,6 +29,8 @@ async function getToken() {
 }
 
 export async function searchHotels({ city, checkIn, checkOut, adults = 2, rooms = 1, maxPrice, minRating, limit = 15 }) {
+  logger.entry('[PROVIDER:hotel]', 'searchHotels', { city, checkIn, checkOut, adults, rooms, maxPrice });
+  const started = Date.now();
   if (!env.AMADEUS_CLIENT_ID || !env.AMADEUS_CLIENT_SECRET) {
     return unavailable('amadeus-hotels', 'Amadeus API credentials not configured');
   }
@@ -72,8 +75,10 @@ export async function searchHotels({ city, checkIn, checkOut, adults = 2, rooms 
       };
     });
     const filtered = maxPrice ? offers.filter((o) => o.price.amount && o.price.amount <= maxPrice) : offers;
+    logger.provider('amadeus', 'searchHotels', { isLive: true, count: filtered.length, latencyMs: Date.now() - started });
     return live('amadeus-hotels', filtered, 'Live hotel offers from Amadeus');
   } catch (err) {
+    logger.error(`[PROVIDER:hotel] Amadeus error: ${err.message}`);
     return unavailable('amadeus-hotels', `Live data unavailable: ${err.message}`);
   }
 }

@@ -1,27 +1,21 @@
 import env from '../config/env.js';
 import { live, unavailable, axiosGet } from './base.provider.js';
+import ignavProvider from './ignav.provider.js';
+import logger from '../utils/logger.js';
 
 /**
- * Flight provider — AviationStack (https://aviationstack.com).
+ * Flight provider — Ignav (primary) + AviationStack (fallback).
  *
- * Free tier: real-time flights + airport lookup (100 req/month).
- * The date-based /schedules endpoint requires a paid plan; when it is not
- * available we fall back to real-time flights currently on the route so the
- * app still returns REAL live data instead of fabricating anything.
+ * Ignav provides real flight PRICES and BOOKING LINKS (free tier: 1,000 req/month).
+ * AviationStack provides real-time tracking without prices (free tier: 100 req/month).
  *
- * AviationStack does not provide prices — the UI shows "Price on request"
- * with external booking links. Never invent fares or schedules.
+ * Strategy: Try Ignav first for real prices → fall back to AviationStack for live data.
+ * Never fabricate prices or schedules.
  */
 
-const BASE_URL = 'https://api.aviationstack.com/v1';
+const AVIATIONSTACK_URL = 'https://api.aviationstack.com/v1';
 const IATA_RE = /^[A-Z]{3}$/;
 
-/**
- * AviationStack's FREE plan restricts the /airports `search` function
- * (HTTP 403 function_access_restricted), while iata_code / city_iata_code
- * lookups are allowed. Resolve common city names locally (no API cost) and
- * only fall back to `search` as a last resort.
- */
 const CITY_IATA = {
   NAGPUR: 'NAG', MUMBAI: 'BOM', DELHI: 'DEL', 'NEW DELHI': 'DEL',
   PUNE: 'PNQ', GOA: 'GOI', BENGALURU: 'BLR', BANGALORE: 'BLR',
@@ -39,24 +33,20 @@ const CITY_IATA = {
   'SAN FRANCISCO': 'SFO', 'LOS ANGELES': 'LAX', CHICAGO: 'ORD',
 };
 
-async function apiGet(path, params) {
+async function aviationstackGet(path, params) {
   const qs = new URLSearchParams({ access_key: env.AVIATIONSTACK_API_KEY, ...params });
-  return axiosGet(`${BASE_URL}${path}?${qs}`, {}, {}, 12000);
+  return axiosGet(`${AVIATIONSTACK_URL}${path}?${qs}`, {}, {}, 12000);
 }
 
-/** Look up a code's display name via the free-plan-safe iata_code endpoint. */
 async function lookupByCode(code) {
   try {
-    const data = await apiGet('/airports', { iata_code: code, limit: 1 });
+    const data = await aviationstackGet('/airports', { iata_code: code, limit: 1 });
     const a = data?.data?.[0];
     if (a?.iata_code) return { iata: a.iata_code, name: a.airport_name || a.city_name || code };
-  } catch {
-    /* never fail — the code itself is usable */
-  }
+  } catch { /* */ }
   return { iata: code, name: code };
 }
 
-/** Accept a 3-letter IATA code, or resolve a city/airport name to its code. */
 async function resolveAirport(query, cache) {
   const raw = String(query || '').trim();
   if (!raw) return { iata: '', name: '' };
@@ -68,37 +58,24 @@ async function resolveAirport(query, cache) {
     cache[key] = res;
     return res;
   }
-
   const mapped = CITY_IATA[key];
   if (mapped) {
     const res = await lookupByCode(mapped);
-    if (res.iata) {
-      cache[key] = res;
-      return res;
-    }
+    if (res.iata) { cache[key] = res; return res; }
   }
-
-  // Last resort: the name-search function is restricted on the free plan —
-  // try it once, and give a clear message if the plan blocks it.
   try {
-    const data = await apiGet('/airports', { search: raw, limit: 5 });
+    const data = await aviationstackGet('/airports', { search: raw, limit: 5 });
     const match = (data?.data || []).find((a) => a.iata_code) || data?.data?.[0];
     if (match?.iata_code) {
       const res = { iata: match.iata_code, name: match.airport_name || match.city_name || raw };
       cache[key] = res;
       return res;
     }
-  } catch {
-    /* fall through to the friendly error */
-  }
-  throw new Error(
-    `Could not resolve an airport for "${raw}". Try an IATA code (e.g. BOM) or a known city (e.g. ${Object.keys(CITY_IATA)
-      .slice(0, 5)
-      .join(', ')}, …).`
-  );
+  } catch { /* */ }
+  throw new Error(`Could not resolve an airport for "${raw}". Try an IATA code (e.g. BOM) or a known city.`);
 }
 
-function toFlight(f, index, source) {
+function aviationstackToFlight(f, index, source) {
   const dep = f?.departure || {};
   const arr = f?.arrival || {};
   const flight = f?.flight || {};
@@ -113,11 +90,9 @@ function toFlight(f, index, source) {
     destination: arr.iata || '',
     departAt: dep.scheduled || dep.estimated || '',
     arriveAt: arr.scheduled || arr.estimated || '',
-    // Schedules feed exposes the connection count as flight.connections (a number);
-    // real-time feed entries fly this exact leg, so 0 is accurate there too.
     stops: typeof flight.connections === 'number' ? flight.connections : (Array.isArray(f?.connection) ? f.connection.length : 0),
     duration: null,
-    price: null, // AviationStack has no fares — never invent them
+    price: null,
     status: f.flight_status || (source === 'schedules' ? 'scheduled' : 'active'),
     isLive: true,
     bookingUrl: 'https://www.google.com/travel/flights',
@@ -125,15 +100,30 @@ function toFlight(f, index, source) {
 }
 
 /**
- * Search flights between two airports (IATA codes or city names).
+ * Search flights — Ignav first (real prices), AviationStack fallback (live tracking).
  */
 export async function searchFlights({ origin, destination, departDate, returnDate, adults = 1, travelClass = 'ECONOMY', nonStop = false, maxPrice } = {}) {
+  logger.entry('[PROVIDER:flight]', 'searchFlights', { origin, destination, departDate, returnDate, adults, travelClass });
+  const started = Date.now();
+  // 1. Try Ignav first (real prices + booking links)
+  if (env.IGNAV_API_KEY) {
+    logger.info('[PROVIDER:flight] Trying Ignav provider first...');
+    const ignavResult = await ignavProvider.searchFlights({ origin, destination, departDate, returnDate, adults, travelClass, nonStop, maxPrice });
+    if (ignavResult.isLive) {
+      logger.provider('ignav', 'searchFlights', { isLive: true, count: ignavResult.data?.length || 0, latencyMs: Date.now() - started, message: ignavResult.message });
+      return ignavResult;
+    }
+    logger.warn(`[PROVIDER:flight] Ignav failed: ${ignavResult.message}, falling through to AviationStack`);
+  }
+
+  // 2. Fallback: AviationStack (no prices, but real-time tracking)
   if (!env.AVIATIONSTACK_API_KEY) {
     return unavailable(
-      'aviationstack-flights',
-      'AviationStack API key not configured. Set AVIATIONSTACK_API_KEY in backend/.env to enable live flight data.'
+      'flight-providers',
+      'No flight API configured. Set IGNAV_API_KEY (real prices) or AVIATIONSTACK_API_KEY (live tracking) in backend/.env.'
     );
   }
+
   try {
     const cache = {};
     const [o, d] = await Promise.all([resolveAirport(origin, cache), resolveAirport(destination, cache)]);
@@ -141,79 +131,68 @@ export async function searchFlights({ origin, destination, departDate, returnDat
       return unavailable('aviationstack-flights', `Could not resolve airports for "${origin}" → "${destination}".`);
     }
 
-    // 1. Date-based schedules (paid plan — real schedules for the chosen date).
-    // On the free plan the /schedules endpoint returns an error body without a
-    // `data` array (not an HTTP failure), so the Array.isArray check below is
-    // what triggers the real-time fallback.
     let flights = null;
     let mode = '';
     try {
-      const sched = await apiGet('/schedules', {
-        dep_iata: o.iata,
-        arr_iata: d.iata,
+      const sched = await aviationstackGet('/schedules', {
+        dep_iata: o.iata, arr_iata: d.iata,
         ...(departDate ? { flight_date: departDate } : {}),
         limit: 20,
       });
       if (Array.isArray(sched?.data) && sched.data.length) {
-        flights = sched.data.map((f, i) => toFlight(f, i, 'schedules'));
+        flights = sched.data.map((f, i) => aviationstackToFlight(f, i, 'schedules'));
         mode = 'schedules';
       }
-    } catch {
-      // Network failure — fall through to real-time.
-    }
+    } catch { /* fall through */ }
 
-    // 2. Fallback: real-time flights currently flying this route (free tier).
-    // Also used when the chosen date has no scheduled flights but the route is live.
     if (!flights) {
-      const rt = await apiGet('/flights', { dep_iata: o.iata, arr_iata: d.iata, limit: 20 });
+      const rt = await aviationstackGet('/flights', { dep_iata: o.iata, arr_iata: d.iata, limit: 20 });
       if (Array.isArray(rt?.data) && rt.data.length) {
-        flights = rt.data.map((f, i) => toFlight(f, i, 'live'));
+        flights = rt.data.map((f, i) => aviationstackToFlight(f, i, 'live'));
         mode = 'live';
       }
     }
 
     if (!flights) {
+      logger.warn(`[PROVIDER:flight] No flights found on route ${o.name} → ${d.name}`);
       return unavailable(
         'aviationstack-flights',
-        `No flights found on route ${o.name} → ${d.name}${departDate ? ` for ${departDate}` : ''}. On the free plan, date schedules require AviationStack's paid plan.`
+        `No flights found on route ${o.name} → ${d.name}${departDate ? ` for ${departDate}` : ''}.`
       );
     }
 
     let message = `Live flight data from AviationStack (${mode === 'schedules' ? 'date schedules' : 'real-time route tracking'})`;
-    if (returnDate) {
-      message += ' · Round-trip not supported on the free plan — outbound shown.';
-    }
+    if (returnDate) message += ' · Round-trip not supported on AviationStack free plan — outbound shown.';
+    message += ' · Prices not available — use Ignav for real fares.';
+    logger.provider('aviationstack', 'searchFlights', { isLive: true, count: flights.length, latencyMs: Date.now() - started, message });
     return live('aviationstack-flights', flights, message);
   } catch (err) {
     const status = err.response?.status;
     const apiErr = err.response?.data?.error?.message || err.response?.data?.error || '';
-    // 429 = free-tier monthly quota (100 req/month) exhausted — the key itself is fine.
-    if (status === 429 || /usage limit|quota|upgrade your subscription/i.test(`${apiErr} ${err.message}`)) {
-      return unavailable(
-        'aviationstack-flights',
-        'AviationStack monthly quota reached. The API key is configured correctly, but the free plan allows only 100 requests/month — upgrade the plan at aviationstack.com or wait for the monthly reset.'
-      );
+    if (status === 429 || /usage limit|quota|upgrade/i.test(`${apiErr} ${err.message}`)) {
+      return unavailable('aviationstack-flights', 'AviationStack monthly quota reached. Wait for reset or upgrade at aviationstack.com.');
     }
     if (status === 401) {
-      return unavailable(
-        'aviationstack-flights',
-        'AviationStack API key is invalid or expired. Check AVIATIONSTACK_API_KEY in backend/.env.'
-      );
+      return unavailable('aviationstack-flights', 'AviationStack API key is invalid. Check AVIATIONSTACK_API_KEY in backend/.env.');
     }
-    return unavailable(
-      'aviationstack-flights',
-      `Live data unavailable: ${err.message}${apiErr ? ` (${apiErr})` : ''}`
-    );
+    return unavailable('aviationstack-flights', `Live data unavailable: ${err.message}${apiErr ? ` (${apiErr})` : ''}`);
   }
 }
 
 export function providerStatus() {
+  const ignavOk = Boolean(env.IGNAV_API_KEY);
+  const aviationOk = Boolean(env.AVIATIONSTACK_API_KEY);
   return {
-    configured: Boolean(env.AVIATIONSTACK_API_KEY),
-    endpoint: 'api.aviationstack.com',
-    message: env.AVIATIONSTACK_API_KEY
-      ? 'Configured - live flight data available'
-      : 'Not configured - set AVIATIONSTACK_API_KEY in backend/.env',
+    configured: ignavOk || aviationOk,
+    providers: {
+      ignav: { configured: ignavOk, endpoint: 'ignav.com', message: ignavOk ? 'Real prices + booking links' : 'Not configured' },
+      aviationstack: { configured: aviationOk, endpoint: 'api.aviationstack.com', message: aviationOk ? 'Live tracking (no prices)' : 'Not configured' },
+    },
+    message: ignavOk
+      ? 'Ignav configured — real flight prices available'
+      : aviationOk
+        ? 'AviationStack configured — live tracking only (no prices). Set IGNAV_API_KEY for real fares.'
+        : 'No flight API configured. Set IGNAV_API_KEY or AVIATIONSTACK_API_KEY in backend/.env.',
   };
 }
 

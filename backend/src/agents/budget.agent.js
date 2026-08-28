@@ -1,39 +1,72 @@
-import { BaseAgent } from './base.agent.js';
-import { BUDGET_AGENT_PROMPT } from '../prompts/agentPrompts.js';
-
 /**
- * The Budget Agent reasons about the deterministic allocation produced by
- * budget.service - it never performs the arithmetic itself.
+ * Budget Agent: deterministic allocation + reasoning.
+ * Now purely deterministic — no Gemini calls. The budget.service already
+ * handles all arithmetic. This agent just produces suggestions.
  */
-class BudgetAgent extends BaseAgent {
+import logger from '../utils/logger.js';
+
+class BudgetAgent {
   constructor() {
-    super('budget');
-    this.systemPrompt = BUDGET_AGENT_PROMPT;
+    this.name = 'budget';
+    this._systemPrompt = '';
   }
 
-  async run({ allocation, totalBudget, currency, travelStyle, providerReport, userId }) {
-    const result = await this.think({
-      prompt: `Deterministic budget allocation (do not change arithmetic):
-${JSON.stringify(allocation, null, 2)}
-Total budget: ${totalBudget} ${currency}
-Travel style: ${travelStyle}
-Provider report:
-${JSON.stringify(providerReport, null, 2)}
-Produce optimization suggestions and category priorities.`,
-      userId,
-      action: 'budget',
-    });
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
 
-    if (result.status !== 'success') {
-      result.data = {
-        suggestions: ['Keep emergency reserve untouched', 'Prefer public transport for local hops', 'Book accommodation early for better rates'],
-        categoryPriorities: ['hotels', 'transport', 'food', 'activities'],
-        risks: [],
-        notes: 'Budget reasoning from deterministic engine (AI unavailable)',
-      };
-      result.status = 'degraded';
+  async run({ allocation, totalBudget, currency, travelStyle, providerReport }) {
+    logger.entry('[AGENT:budget]', 'run', { totalBudget, currency, travelStyle, providerReport });
+    const suggestions = [];
+    const risks = [];
+
+    // Generate suggestions based on travel style and allocation
+    if (travelStyle === 'budget' || travelStyle === 'backpacker') {
+      suggestions.push('Prefer public transport for local hops to save on transport costs');
+      suggestions.push('Book accommodation early for better rates');
     }
-    return result;
+    if (travelStyle === 'luxury') {
+      suggestions.push('Consider direct flights for comfort even if slightly more expensive');
+      suggestions.push('Book premium hotels with flexible cancellation');
+    }
+    suggestions.push('Keep emergency reserve untouched unless absolutely necessary');
+    suggestions.push('Book accommodation early for better rates');
+
+    // Identify risks based on provider data
+    if (!providerReport?.hotelsLive) {
+      risks.push('Hotel prices are estimates — actual rates may vary at booking');
+    }
+    if (!providerReport?.flightsLive) {
+      risks.push('Flight prices are estimates — check live prices before booking');
+    }
+    if (!providerReport?.weatherLive) {
+      risks.push('Weather data unavailable — plan flexible indoor/outdoor options');
+    }
+
+    logger.exit('[AGENT:budget]', 'run', { status: 'success', suggestionCount: suggestions.length, riskCount: risks.length });
+    return {
+      agent: this.name,
+      status: 'success',
+      data: {
+        suggestions,
+        categoryPriorities: ['hotels', 'transport', 'food', 'activities'],
+        risks,
+        notes: 'Budget reasoning from deterministic engine',
+      },
+      message: 'Budget analysis completed deterministically',
+      latencyMs: 0,
+      usedAI: false,
+      source: 'deterministic',
+    };
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

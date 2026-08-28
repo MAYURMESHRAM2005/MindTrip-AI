@@ -20,6 +20,8 @@ export const emailConfigured = Boolean(transporter);
  * auth flows still work locally - the returned links are real and functional.
  */
 export async function sendEmail({ to, subject, html, text }) {
+  logger.entry('[EMAIL]', 'sendEmail', { to, subject, hasHtml: Boolean(html) });
+  const started = Date.now();
   if (!transporter) {
     logger.info(`[EMAIL] SMTP not configured - simulated send to ${to} subject="${subject}"`);
     return { success: false, simulated: true, message: 'Email service not configured (SMTP). Email logged instead.' };
@@ -32,14 +34,16 @@ export async function sendEmail({ to, subject, html, text }) {
       html,
       text,
     });
+    logger.exit('[EMAIL]', 'sendEmail', { status: 'success', to, latencyMs: Date.now() - started });
     return { success: true, simulated: false };
   } catch (err) {
-    logger.error('[EMAIL] send failed', err.message);
+    logger.error(`[EMAIL] send failed to ${to}: ${err.message}`);
     return { success: false, simulated: false, message: err.message };
   }
 }
 
 export function sendVerificationEmail({ to, name, token }) {
+  logger.entry('[EMAIL]', 'sendVerificationEmail', { to, name });
   const link = `${env.FRONTEND_URL}/verify-email/${token}`;
   return sendEmail({
     to,
@@ -56,6 +60,7 @@ export function sendVerificationEmail({ to, name, token }) {
 }
 
 export function sendPasswordResetEmail({ to, name, token }) {
+  logger.entry('[EMAIL]', 'sendPasswordResetEmail', { to, name });
   const link = `${env.FRONTEND_URL}/reset-password/${token}`;
   return sendEmail({
     to,

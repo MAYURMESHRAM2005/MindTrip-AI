@@ -14,6 +14,7 @@ import {
 import env from '../config/env.js';
 import emailService from './email.service.js';
 import { verifyFirebaseIdToken } from './firebase.service.js';
+import logger from '../utils/logger.js';
 
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -52,8 +53,12 @@ async function issueTokens(user, req) {
 }
 
 export async function register({ name, email, password }, req) {
+  logger.entry('[AUTH]', 'register', { email, name });
   const existing = await User.findOne({ email });
-  if (existing) throw ApiError.conflict('An account with this email already exists');
+  if (existing) {
+    logger.warn(`[AUTH] Register failed — email already exists: ${email}`);
+    throw ApiError.conflict('An account with this email already exists');
+  }
 
   const user = await User.create({
     name,
@@ -74,20 +79,30 @@ export async function register({ name, email, password }, req) {
   });
 
   const { accessToken, refreshToken } = await issueTokens(user, req);
+  logger.info(`[AUTH] Register success: ${email} (id: ${user._id})`);
   return { user: publicUser(user), accessToken, refreshToken, emailSent: emailResult.success, emailSimulated: emailResult.simulated };
 }
 
 export async function login({ email, password }, req) {
+  logger.entry('[AUTH]', 'login', { email });
   const user = await User.findOne({ email }).select('+password');
-  if (!user) throw ApiError.unauthorized('Invalid email or password');
+  if (!user) {
+    logger.warn(`[AUTH] Login failed — user not found: ${email}`);
+    throw ApiError.unauthorized('Invalid email or password');
+  }
   const valid = await comparePassword(password, user.password);
-  if (!valid) throw ApiError.unauthorized('Invalid email or password');
+  if (!valid) {
+    logger.warn(`[AUTH] Login failed — invalid password: ${email}`);
+    throw ApiError.unauthorized('Invalid email or password');
+  }
 
   const { accessToken, refreshToken } = await issueTokens(user, req);
+  logger.info(`[AUTH] Login success: ${email} (id: ${user._id})`);
   return { user: publicUser(user), accessToken, refreshToken };
 }
 
 export async function refreshTokens(refreshToken, req) {
+  logger.entry('[AUTH]', 'refreshTokens', { hasToken: Boolean(refreshToken) });
   if (!refreshToken) throw ApiError.unauthorized('Refresh token missing');
 
   let payload;
@@ -113,30 +128,39 @@ export async function refreshTokens(refreshToken, req) {
   await stored.save();
 
   const { accessToken, refreshToken: newRefresh } = await issueTokens(user, req);
+  logger.info(`[AUTH] Token refreshed for user: ${user._id}`);
   return { user: publicUser(user), accessToken, refreshToken: newRefresh };
 }
 
 export async function logout(refreshToken) {
+  logger.entry('[AUTH]', 'logout', { hasToken: Boolean(refreshToken) });
   if (refreshToken) {
     await RefreshToken.findOneAndUpdate(
       { tokenHash: hashToken(refreshToken) },
       { revoked: true }
     );
+    logger.info('[AUTH] Logout success — refresh token revoked');
   }
 }
 
 export async function verifyEmail(token) {
+  logger.entry('[AUTH]', 'verifyEmail', { tokenLength: token?.length || 0 });
   const hashed = hashToken(token);
   const user = await User.findOne({ verifyToken: hashed, verifyTokenExpires: { $gt: new Date() } }).select('+verifyToken +verifyTokenExpires');
-  if (!user) throw ApiError.badRequest('Verification link is invalid or has expired');
+  if (!user) {
+    logger.warn('[AUTH] Email verification failed — invalid or expired token');
+    throw ApiError.badRequest('Verification link is invalid or has expired');
+  }
   user.emailVerified = true;
   user.verifyToken = null;
   user.verifyTokenExpires = null;
   await user.save({ validateBeforeSave: false });
+  logger.info(`[AUTH] Email verified for user: ${user._id}`);
   return publicUser(user);
 }
 
 export async function forgotPassword(email) {
+  logger.entry('[AUTH]', 'forgotPassword', { email });
   const user = await User.findOne({ email });
   // Always respond the same way to avoid user enumeration.
   if (!user) return { sent: false, simulated: true, message: 'If that email exists, a reset link has been sent.' };
@@ -145,18 +169,24 @@ export async function forgotPassword(email) {
   user.resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000);
   await user.save({ validateBeforeSave: false });
   const result = await emailService.sendPasswordResetEmail({ to: user.email, name: user.name, token });
+  logger.info(`[AUTH] Password reset email sent: ${email} (success: ${result.success}, simulated: ${result.simulated})`);
   return { sent: result.success, simulated: result.simulated, message: 'If that email exists, a reset link has been sent.' };
 }
 
 export async function resetPassword(token, newPassword) {
+  logger.entry('[AUTH]', 'resetPassword', { tokenLength: token?.length || 0 });
   const hashed = hashToken(token);
   const user = await User.findOne({ resetToken: hashed, resetTokenExpires: { $gt: new Date() } }).select('+resetToken +resetTokenExpires');
-  if (!user) throw ApiError.badRequest('Reset link is invalid or has expired');
+  if (!user) {
+    logger.warn('[AUTH] Password reset failed — invalid or expired token');
+    throw ApiError.badRequest('Reset link is invalid or has expired');
+  }
   user.password = await hashPassword(newPassword);
   user.resetToken = null;
   user.resetTokenExpires = null;
   await user.save({ validateBeforeSave: false });
   await RefreshToken.deleteMany({ user: user._id }); // invalidate all sessions
+  logger.info(`[AUTH] Password reset success for user: ${user._id}`);
   return publicUser(user);
 }
 
@@ -166,6 +196,7 @@ export async function resetPassword(token, newPassword) {
  * session tokens (JWT access/refresh httpOnly cookies remain unchanged).
  */
 export async function firebaseLogin(idToken, req) {
+  logger.entry('[AUTH]', 'firebaseLogin', { email: '***' });
   const info = await verifyFirebaseIdToken(idToken);
   if (!info.email) throw ApiError.unauthorized('Google account has no email');
 
@@ -189,6 +220,7 @@ export async function firebaseLogin(idToken, req) {
     await user.save({ validateBeforeSave: false });
   }
   const { accessToken, refreshToken } = await issueTokens(user, req);
+  logger.info(`[AUTH] Firebase login success: ${info.email} (user: ${user._id})`);
   return { user: publicUser(user), accessToken, refreshToken };
 }
 

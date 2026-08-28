@@ -1,5 +1,6 @@
 import env from '../config/env.js';
 import { live, unavailable, axiosGet, axiosPost } from './base.provider.js';
+import logger from '../utils/logger.js';
 
 /**
  * Geoapify maps provider.
@@ -117,11 +118,14 @@ async function resolveCoordinates(place) {
 /* -------------------------------- exports -------------------------------- */
 
 export async function geocode(address) {
+  logger.entry('[PROVIDER:maps]', 'geocode', { address });
+  const started = Date.now();
   if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
   try {
     const data = await apiGet(GEOCODE_URL, { text: address, limit: 1, format: 'json', lang: 'en' });
     const r = data?.results?.[0];
     if (!r) return unavailable('geoapify', `Geocoding failed: no results for "${address}"`);
+    logger.provider('geoapify', 'geocode', { isLive: true, latencyMs: Date.now() - started });
     return live('geoapify', {
       address: r.formatted || r.address_line1 || address,
       lat: r.lat,
@@ -129,6 +133,7 @@ export async function geocode(address) {
       placeId: r.place_id || '',
     });
   } catch (err) {
+    logger.error(`[PROVIDER:maps] geocode error: ${err.message}`);
     return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }
@@ -170,6 +175,8 @@ export async function autocomplete(text, { limit = 6, type = '' } = {}) {
 }
 
 export async function directions(origin, destination, mode = 'driving', alternatives = true) {
+  logger.entry('[PROVIDER:maps]', 'directions', { origin, destination, mode, alternatives });
+  const started = Date.now();
   if (!key()) return unavailable('geoapify', 'Geoapify API key not configured');
   try {
     const o = await resolveCoordinates(origin);
@@ -206,8 +213,10 @@ export async function directions(origin, destination, mode = 'driving', alternat
         })),
       };
     });
+    logger.provider('geoapify', 'directions', { isLive: true, routeCount: routes.length, latencyMs: Date.now() - started });
     return live('geoapify', { origin, destination, mode, routes, originPoint: o, destinationPoint: d });
   } catch (err) {
+    logger.error(`[PROVIDER:maps] directions error: ${err.message}`);
     return unavailable('geoapify', `Live data unavailable: ${err.message}`);
   }
 }

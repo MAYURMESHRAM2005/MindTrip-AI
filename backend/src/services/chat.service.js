@@ -2,6 +2,7 @@ import Trip from '../models/Trip.js';
 import Itinerary from '../models/Itinerary.js';
 import AIConversation from '../models/AIConversation.js';
 import geminiService from './gemini.service.js';
+import logger from '../utils/logger.js';
 import orchestrator from '../orchestrator/tripOrchestrator.js';
 import weatherProvider from '../providers/weather.provider.js';
 import placesProvider from '../providers/places.provider.js';
@@ -156,8 +157,11 @@ async function handleEmergency(trip) {
  * Gemini for a contextual answer using the user's saved trip.
  */
 export async function processMessage({ userId, tripId, message, conversationId }) {
+  logger.entry('[CHAT]', 'processMessage', { userId, tripId, messageLength: message?.length, conversationId });
+  const started = Date.now();
   const context = await loadTripContext(userId, tripId);
   const intent = detectIntent(message);
+  logger.info(`[CHAT] Detected intent: '${intent}' for message: '${message?.slice(0, 50)}...'`);
   let actionResult = null;
 
   switch (intent) {
@@ -221,6 +225,7 @@ export async function processMessage({ userId, tripId, message, conversationId }
   conversation.messages = conversation.messages.slice(-40);
   await conversation.save();
 
+  logger.exit('[CHAT]', 'processMessage', { status: 'success', intent, actionExecuted: Boolean(actionResult), latencyMs: Date.now() - started });
   return {
     reply,
     intent,

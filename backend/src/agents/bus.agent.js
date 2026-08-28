@@ -1,18 +1,22 @@
-import { BaseAgent } from './base.agent.js';
-import { BUS_AGENT_PROMPT } from '../prompts/agentPrompts.js';
 import busProvider from '../providers/bus.provider.js';
+import logger from '../utils/logger.js';
 
 /**
- * Bus Agent: real schedules from the configured provider. If the provider is
- * not configured, an explicit "Live data unavailable" result is returned.
+ * Bus Agent: live schedules from Pay2all or configured fallback.
+ * Heuristic-based selection — no Gemini calls.
  */
-class BusAgent extends BaseAgent {
+class BusAgent {
   constructor() {
-    super('bus');
-    this.systemPrompt = BUS_AGENT_PROMPT;
+    this.name = 'bus';
+    this._systemPrompt = '';
   }
 
-  async run({ from, to, date, passengers, userId }) {
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
+
+  async run({ from, to, date, passengers }) {
+    logger.entry('[AGENT:bus]', 'run', { from, to, date, passengers });
+    const started = Date.now();
     const providerResult = await busProvider.searchBuses({ from, to, date, passengers });
 
     if (!providerResult.isLive) {
@@ -26,28 +30,51 @@ class BusAgent extends BaseAgent {
           providerStatus: busProvider.providerStatus(),
         },
         message: providerResult.message,
+        latencyMs: 0,
         usedAI: false,
         source: 'provider',
       };
     }
 
-    const result = await this.think({
-      prompt: `Route: ${from} → ${to}, date ${date}, ${passengers} passenger(s).
-Real bus data from configured provider:
-${JSON.stringify(providerResult.data, null, 2)}
-Recommend options from this data only.`,
-      userId,
-      action: 'busSelect',
-      data: { buses: providerResult.data },
-    });
+    const buses = providerResult.data || [];
+    logger.info(`[AGENT:bus] Got ${buses.length} bus results from ${providerResult.source}`);
 
-    if (result.status === 'success') {
-      result.data = { ...result.data, buses: providerResult.data, isLive: true };
-    } else {
-      result.status = 'degraded';
-      result.data = { buses: providerResult.data, isLive: true };
-    }
-    return result;
+    // Heuristic: select earliest departure
+    const selected = buses[0] || null;
+    const alternatives = buses.slice(1, 4);
+    const cheapest = [...buses]
+      .filter((b) => b.price?.amount)
+      .sort((a, b) => (a.price?.amount ?? Infinity) - (b.price?.amount ?? Infinity))[0];
+
+    logger.exit('[AGENT:bus]', 'run', { status: 'success', busCount: buses.length, selected: selected?.operator || selected?.name || 'none', latencyMs: Date.now() - started });
+    return {
+      agent: this.name,
+      status: 'success',
+      data: {
+        buses,
+        selected,
+        alternatives,
+        recommendation: selected
+          ? `${selected.operator || selected.name || 'Bus'} — departs ${selected.departure || selected.departureTime || 'N/A'}`
+          : 'No buses available',
+        cheapest,
+        isLive: true,
+      },
+      message: `Bus data from provider (${buses.length} options)`,
+      latencyMs: Date.now() - started,
+      usedAI: false,
+      source: 'provider',
+    };
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

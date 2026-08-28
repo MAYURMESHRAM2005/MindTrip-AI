@@ -1,16 +1,18 @@
-import { BaseAgent } from './base.agent.js';
-import { ORCHESTRATOR_PROMPT } from '../prompts/agentPrompts.js';
-
 /**
- * Orchestrator Agent: receives the raw trip request, produces the structured
- * summary consumed by all other agents, and coordinates the pipeline via
- * tripOrchestrator. This agent runs first.
+ * Orchestrator Agent: produces the structured summary consumed by all other
+ * agents. This agent is now purely deterministic — no Gemini calls needed.
+ * The trip title, days and traveler count are computed from the raw request.
  */
-class OrchestratorAgent extends BaseAgent {
+import logger from '../utils/logger.js';
+
+class OrchestratorAgent {
   constructor() {
-    super('orchestrator');
-    this.systemPrompt = ORCHESTRATOR_PROMPT;
+    this.name = 'orchestrator';
+    this._systemPrompt = '';
   }
+
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
 
   computeDays(request) {
     const start = new Date(request.startDate);
@@ -19,35 +21,42 @@ class OrchestratorAgent extends BaseAgent {
     return Math.max(1, Math.round((end - start) / 86400000) + 1);
   }
 
-  async run({ request, userId }) {
+  async run({ request }) {
     const days = this.computeDays(request);
-    const result = await this.think({
-      prompt: `Raw trip request:
-${JSON.stringify(request, null, 2)}
-Produce the coordination summary.`,
-      userId,
-      action: 'orchestrate',
-    });
-
-    if (result.status !== 'success') {
-      result.status = 'degraded';
-      result.data = {
+    logger.entry('[AGENT:orchestrator]', 'run', { destination: request.destination, startDate: request.startDate, endDate: request.endDate, days });
+    const result = {
+      agent: this.name,
+      status: 'success',
+      data: {
         summary: {
           tripTitle: request.title || `${request.destination || 'Trip'} • ${days} days`,
           days,
-          travelers: { adults: request.adults || 1, children: request.children || 0 },
+          travelers: {
+            adults: request.adults || 1,
+            children: request.children || 0,
+          },
           estimatedDurationDays: days,
         },
         focusAreas: ['budget', 'itinerary', 'safety'],
-        notes: 'Orchestrator summary computed deterministically (AI unavailable)',
-      };
-    }
-    result.data.summary = {
-      ...result.data.summary,
-      days: days || result.data.summary?.days,
-      travelers: { adults: request.adults || 1, children: request.children || 0 },
+        notes: 'Orchestrator summary computed deterministically',
+      },
+      message: 'Orchestration summary computed',
+      latencyMs: 0,
+      usedAI: false,
+      source: 'deterministic',
     };
+    logger.exit('[AGENT:orchestrator]', 'run', { status: 'success', days, travelers: result.data?.summary?.travelers });
     return result;
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

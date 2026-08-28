@@ -1,59 +1,79 @@
-import { BaseAgent } from './base.agent.js';
-import { DESTINATION_AGENT_PROMPT } from '../prompts/agentPrompts.js';
-
 /**
- * Suggests a destination when the user asked for one, otherwise validates the
- * provided destination.
+ * Destination Agent: suggests a destination or validates the provided one.
+ * Now purely deterministic — no Gemini calls. Uses a curated list of real
+ * destinations by travel style.
  */
-class DestinationAgent extends BaseAgent {
+import logger from '../utils/logger.js';
+
+class DestinationAgent {
   constructor() {
-    super('destination');
-    this.systemPrompt = DESTINATION_AGENT_PROMPT;
+    this.name = 'destination';
+    this._systemPrompt = '';
   }
 
-  async suggest({ prefs, request, userId }) {
-    const result = await this.think({
-      prompt: `Suggest a destination for this traveler:
-Travel style: ${prefs.travelStyle}
-Interests: ${prefs.interests?.join(', ') || 'general'}
-Budget: ${request.totalBudget} ${request.currency}
-Days: ${this._days(request)}
-Food preference: ${prefs.foodPreference || 'any'}
-Origin: ${request.origin || 'not specified'}
-Only suggest real destinations.`,
-      userId,
-      action: 'suggestDestination',
-    });
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
 
-    if (result.status === 'success' && result.data?.destination) {
-      return result;
+  /** Curated real destinations by travel style. */
+  static CURATED = {
+    romantic: 'Udaipur, India',
+    adventure: 'Manali, India',
+    family: 'Goa, India',
+    budget: 'Pondicherry, India',
+    backpacker: 'Rishikesh, India',
+    business: 'Mumbai, India',
+    luxury: 'Dubai, UAE',
+    standard: 'Jaipur, India',
+  };
+
+  async suggest({ prefs, request }) {
+    logger.entry('[AGENT:destination]', 'suggest', { destination: request.destination, travelStyle: prefs?.travelStyle, suggestDestination: request.suggestDestination });
+    // If a specific destination was provided and it's non-empty, use it
+    if (request.destination && !request.suggestDestination) {
+      logger.exit('[AGENT:destination]', 'suggest', { status: 'success', destination: request.destination, source: 'user-provided' });
+      return {
+        agent: this.name,
+        status: 'success',
+        data: {
+          destination: request.destination,
+          reason: `Destination provided: ${request.destination}`,
+          highlights: [],
+        },
+        message: `Destination provided: ${request.destination}`,
+        latencyMs: 0,
+        usedAI: false,
+        source: 'deterministic',
+      };
     }
-    // Deterministic fallback: curated real destinations by style
-    const curated = {
-      romantic: 'Udaipur, India',
-      adventure: 'Manali, India',
-      family: 'Goa, India',
-      budget: 'Pondicherry, India',
-      backpacker: 'Rishikesh, India',
-      business: 'Mumbai, India',
-      luxury: 'Dubai, UAE',
-      standard: 'Jaipur, India',
+
+    // Otherwise, suggest from curated list based on travel style
+    const curated = DestinationAgent.CURATED;
+    const destination = curated[prefs.travelStyle] || curated.standard;
+
+    logger.exit('[AGENT:destination]', 'suggest', { status: 'success', destination, source: 'curated' });
+    return {
+      agent: this.name,
+      status: 'success',
+      data: {
+        destination,
+        reason: `Suggested from curated list based on ${prefs.travelStyle || 'standard'} travel style`,
+        highlights: [],
+      },
+      message: `Destination suggested: ${destination}`,
+      latencyMs: 0,
+      usedAI: false,
+      source: 'deterministic',
     };
-    result.status = 'degraded';
-    result.data = {
-      destination: curated[prefs.travelStyle] || 'Jaipur, India',
-      reason: 'Suggested from curated destination list (Gemini unavailable).',
-      highlights: [],
-    };
-    result.message = 'Destination suggested from curated list (AI unavailable)';
-    return result;
   }
 
-  _days(request) {
-    const start = new Date(request.startDate);
-    const end = new Date(request.endDate);
-    if (isNaN(start) || isNaN(end)) return 3;
-    return Math.max(1, Math.round((end - start) / 86400000));
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

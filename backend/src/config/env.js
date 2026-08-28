@@ -36,6 +36,8 @@ const env = {
 
   AVIATIONSTACK_API_KEY: process.env.AVIATIONSTACK_API_KEY || '',
 
+  IGNAV_API_KEY: process.env.IGNAV_API_KEY || '',
+
   // Amadeus is used for HOTELS only (flights use AviationStack).
   AMADEUS_CLIENT_ID: process.env.AMADEUS_CLIENT_ID || '',
   AMADEUS_CLIENT_SECRET: process.env.AMADEUS_CLIENT_SECRET || '',
@@ -48,6 +50,9 @@ const env = {
   BUS_API_URL: process.env.BUS_API_URL || '',
   BUS_API_KEY: process.env.BUS_API_KEY || '',
   BUS_API_ENDPOINT: process.env.BUS_API_ENDPOINT || '/search',
+
+  PAY2ALL_API_KEY: process.env.PAY2ALL_API_KEY || '',
+  PAY2ALL_BASE_URL: process.env.PAY2ALL_BASE_URL || 'https://pay2all.in/api/v1',
 
   UNSPLASH_ACCESS_KEY: process.env.UNSPLASH_ACCESS_KEY || '',
 

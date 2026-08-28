@@ -1,36 +1,82 @@
-import { BaseAgent } from './base.agent.js';
-import { LOCAL_GUIDE_AGENT_PROMPT } from '../prompts/agentPrompts.js';
-
 /**
- * Local Guide Agent: cultural and practical tips. Uses general knowledge;
- * never invents specific prices, hours or availability.
+ * Local Guide Agent: cultural and practical tips using general knowledge.
+ * Now purely deterministic — no Gemini calls. Never invents specific prices,
+ * hours or availability.
  */
-class LocalGuideAgent extends BaseAgent {
+import logger from '../utils/logger.js';
+
+class LocalGuideAgent {
   constructor() {
-    super('localGuide');
-    this.systemPrompt = LOCAL_GUIDE_AGENT_PROMPT;
+    this.name = 'localGuide';
+    this._systemPrompt = '';
   }
 
-  async run({ destination, travelStyle, userId }) {
-    const result = await this.think({
-      prompt: `Destination: ${destination}
-Travel style: ${travelStyle || 'standard'}
-Share genuine local tips, etiquette, hidden gems and useful phrases for this destination.`,
-      userId,
-      action: 'localGuide',
-    });
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
 
-    if (result.status !== 'success') {
-      result.status = 'degraded';
-      result.data = {
-        localTips: ['Respect local customs and dress codes at religious sites', 'Carry small change for local markets and tips'],
-        etiquette: [],
-        hiddenGems: [],
-        languagePhrases: [],
-        paymentNotes: 'Carry a mix of cash and cards.',
-      };
+  async run({ destination, travelStyle }) {
+    logger.entry('[AGENT:localGuide]', 'run', { destination, travelStyle });
+    const tips = [
+      'Respect local customs and dress codes at religious sites',
+      'Carry small change for local markets and tips',
+      'Try local street food from busy stalls — high turnover means fresh food',
+      'Ask locals for recommendations — they know the hidden gems',
+    ];
+
+    const etiquette = [
+      'Remove shoes before entering temples, mosques and some homes',
+      'Ask permission before photographing people',
+      'Use your right hand for giving and receiving in many cultures',
+    ];
+
+    const hiddenGems = [
+      'Visit popular attractions early morning or late afternoon to avoid crowds',
+      'Walk through residential areas for authentic local experiences',
+      'Check for free walking tours led by local volunteers',
+    ];
+
+    const languagePhrases = [
+      'Hello / Greetings',
+      'Thank you',
+      'How much does this cost?',
+      'Where is the nearest hospital?',
+      'Can you help me?',
+    ];
+
+    let paymentNotes = 'Carry a mix of cash and cards. ATMs are widely available in cities.';
+    if (travelStyle === 'budget' || travelStyle === 'backpacker') {
+      paymentNotes = 'Carry mostly cash for local markets and small vendors. Use cards for hotels and restaurants.';
     }
-    return result;
+    if (travelStyle === 'luxury') {
+      paymentNotes = 'Cards are accepted at most upscale establishments. Keep some cash for tips and small purchases.';
+    }
+
+    logger.exit('[AGENT:localGuide]', 'run', { status: 'success', tipsCount: tips.length, etiquetteCount: etiquette.length });
+    return {
+      agent: this.name,
+      status: 'success',
+      data: {
+        localTips: tips,
+        etiquette,
+        hiddenGems,
+        languagePhrases,
+        paymentNotes,
+      },
+      message: 'Local guide tips generated from general knowledge',
+      latencyMs: 0,
+      usedAI: false,
+      source: 'deterministic',
+    };
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

@@ -21,25 +21,32 @@ export const useAuthStore = create((set, get) => ({
    * rotates it and returns a fresh short-lived access token + user.
    */
   bootstrap: async () => {
+    console.log('[AUTH] Bootstrap: attempting session restore...');
     try {
       const { data } = await api.post('/auth/refresh');
+      const user = data?.data?.user || null;
+      console.log('[AUTH] Bootstrap: session restored for', user?.email || 'anonymous');
       set({
-        user: data?.data?.user || null,
+        user,
         accessToken: data?.data?.accessToken || null,
         authenticated: Boolean(data?.data?.user),
         initializing: false,
       });
-    } catch {
+    } catch (err) {
+      console.log('[AUTH] Bootstrap: no active session', err.message);
       set({ user: null, accessToken: null, authenticated: false, initializing: false });
     }
   },
 
   setToken: (token) => set({ accessToken: token }),
 
-  login: ({ user, accessToken }) =>
-    set({ user, accessToken, authenticated: true, initializing: false }),
+  login: ({ user, accessToken }) => {
+    console.log('[AUTH] Login:', user?.email);
+    set({ user, accessToken, authenticated: true, initializing: false });
+  },
 
   logout: async () => {
+    console.log('[AUTH] Logout: clearing session...');
     try {
       await api.post('/auth/logout');
     } catch {

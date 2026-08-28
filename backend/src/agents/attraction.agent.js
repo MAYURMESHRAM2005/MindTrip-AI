@@ -1,18 +1,23 @@
-import { BaseAgent } from './base.agent.js';
-import { ATTRACTION_AGENT_PROMPT } from '../prompts/agentPrompts.js';
 import placesProvider from '../providers/places.provider.js';
+import logger from '../utils/logger.js';
 
 /**
- * Attraction Agent: real Places attractions first; Gemini balances the list
- * around the traveler's interests and activity level.
+ * Attraction Agent: real Places attractions from Geoapify.
+ * Now purely provider-based — no Gemini calls. Attractions are returned
+ * directly from the provider.
  */
-class AttractionAgent extends BaseAgent {
+class AttractionAgent {
   constructor() {
-    super('attraction');
-    this.systemPrompt = ATTRACTION_AGENT_PROMPT;
+    this.name = 'attraction';
+    this._systemPrompt = '';
   }
 
-  async run({ destination, interests, activityLevel, userId }) {
+  get systemPrompt() { return this._systemPrompt; }
+  set systemPrompt(v) { this._systemPrompt = v; }
+
+  async run({ destination, interests, activityLevel }) {
+    logger.entry('[AGENT:attraction]', 'run', { destination, interests, activityLevel });
+    const started = Date.now();
     const providerResult = await placesProvider.textSearch({
       query: `${destination} top tourist attractions`,
       type: 'tourist_attraction',
@@ -25,30 +30,39 @@ class AttractionAgent extends BaseAgent {
         status: 'degraded',
         data: { attractions: [], isLive: false, message: providerResult.message },
         message: providerResult.message,
+        latencyMs: 0,
         usedAI: false,
         source: 'provider',
       };
     }
 
-    const result = await this.think({
-      prompt: `Destination: ${destination}
-Interests: ${interests?.join(', ') || 'general'}
-Activity level: ${activityLevel || 'moderate'}
-Real attraction data from Geoapify Places:
-${JSON.stringify(providerResult.data, null, 2)}
-Select a balanced set of must-see attractions from this list only.`,
-      userId,
-      action: 'attractionPlan',
-      data: { attractions: providerResult.data },
-    });
+    const attractions = providerResult.data || [];
+    logger.exit('[AGENT:attraction]', 'run', { status: 'success', count: attractions.length, latencyMs: Date.now() - started });
 
-    if (result.status === 'success') {
-      result.data = { ...result.data, attractions: providerResult.data, isLive: true };
-    } else {
-      result.status = 'degraded';
-      result.data = { attractions: providerResult.data, isLive: true, dailyPlan: [] };
-    }
-    return result;
+    return {
+      agent: this.name,
+      status: 'success',
+      data: {
+        attractions,
+        isLive: true,
+        dailyPlan: [],
+        notes: `Attraction data from Geoapify (${attractions.length} options)`,
+      },
+      message: `Attraction data from provider (${attractions.length} options)`,
+      latencyMs: Date.now() - started,
+      usedAI: false,
+      source: 'provider',
+    };
+  }
+
+  report(result) {
+    return {
+      agent: this.name,
+      status: result.status,
+      message: result.message,
+      latencyMs: result.latencyMs,
+      usedAI: result.usedAI,
+    };
   }
 }
 

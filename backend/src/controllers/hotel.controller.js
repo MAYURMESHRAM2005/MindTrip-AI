@@ -3,6 +3,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import hotelProvider from '../providers/hotel.provider.js';
 import placesProvider from '../providers/places.provider.js';
 import { convert } from '../providers/currency.provider.js';
+import logger from '../utils/logger.js';
 
 /**
  * Search hotels: Amadeus offers first. When Amadeus is unconfigured we
@@ -10,6 +11,8 @@ import { convert } from '../providers/currency.provider.js';
  * labelled with its source - never invented inventory.
  */
 export const searchHotels = asyncHandler(async (req, res) => {
+  logger.entry('[CTRL:hotel]', 'searchHotels', req.query);
+  const started = Date.now();
   const { city, checkIn, checkOut, adults, rooms, maxPrice, minRating, currency } = req.query;
 
   const amadeus = await hotelProvider.searchHotels({
@@ -23,6 +26,7 @@ export const searchHotels = asyncHandler(async (req, res) => {
   });
 
   if (amadeus.isLive) {
+    logger.exit('[CTRL:hotel]', 'searchHotels', { status: 'success', provider: 'amadeus', hotelCount: amadeus.data?.length || 0, latencyMs: Date.now() - started });
     return res.json(ApiResponse.ok(amadeus.message, { hotels: amadeus.data, provider: 'amadeus', isLive: true }));
   }
 
@@ -46,6 +50,7 @@ export const searchHotels = asyncHandler(async (req, res) => {
     return res.json(ApiResponse.ok('Live hotel listings from Geoapify Places (Amadeus unavailable)', { hotels, provider: 'geoapify', isLive: true, note: amadeus.message }));
   }
 
+  logger.exit('[CTRL:hotel]', 'searchHotels', { status: 'degraded', provider: 'none', latencyMs: Date.now() - started });
   res.json(
     ApiResponse.ok('Live hotel data unavailable', {
       hotels: [],

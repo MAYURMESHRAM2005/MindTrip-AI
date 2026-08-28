@@ -1,4 +1,5 @@
 import geminiService from './gemini.service.js';
+import logger from '../utils/logger.js';
 
 /**
  * Built-in dictionary for key UI strings in English, Hindi and Marathi.
@@ -32,7 +33,12 @@ export function translateDict(key, lang) {
  * (with a notice) when AI is unavailable.
  */
 export async function translateText(text, target = 'en') {
-  if (target === 'en' && !text.match(/[^\x00-\x7F]/)) return { translated: text, viaAI: false };
+  logger.entry('[TRANSLATE]', 'translateText', { target, textLength: text?.length });
+  if (target === 'en' && !text.match(/[^\x00-\x7F]/)) {
+    logger.info('[TRANSLATE] Skipping — text is already English');
+    return { translated: text, viaAI: false };
+  }
+  const started = Date.now();
   const res = await geminiService.generateText({
     system: `You are a professional travel-app translator. Translate the user's text into ${target === 'hi' ? 'Hindi' : target === 'mr' ? 'Marathi' : 'English'}. Respond with ONLY the translated text, nothing else. Preserve place names, numbers and emoji.`,
     prompt: text,
@@ -40,8 +46,10 @@ export async function translateText(text, target = 'en') {
     action: 'translate',
   });
   if (res.success) {
+    logger.info(`[TRANSLATE] Success (${Date.now() - started}ms): ${res.text.trim().slice(0, 50)}...`);
     return { translated: res.text.trim(), viaAI: true, note: 'Translated by Gemini' };
   }
+  logger.warn(`[TRANSLATE] Failed (${Date.now() - started}ms): ${res.message}`);
   return { translated: text, viaAI: false, note: res.message };
 }
 

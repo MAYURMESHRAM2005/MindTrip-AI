@@ -46,6 +46,7 @@ export const hotelsApi = {
 
 export const flightsApi = {
   search: (params) => api.get('/flights/search', { params }),
+  bookingLinks: (ignavId) => api.post('/flights/booking-links', { ignav_id: ignavId }),
 };
 
 export const trainsApi = {
@@ -54,6 +55,9 @@ export const trainsApi = {
 
 export const busesApi = {
   search: (params) => api.get('/buses/search', { params }),
+  cities: (q) => api.get('/buses/cities', { params: { q } }),
+  seatLayout: (tripId) => api.get('/buses/seat-layout', { params: { tripId } }),
+  book: (payload) => api.post('/buses/book', payload),
 };
 
 export const restaurantsApi = {

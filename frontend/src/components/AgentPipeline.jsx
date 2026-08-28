@@ -27,14 +27,18 @@ export default function AgentPipeline({ running, onComplete, durationMs = 12000 
       setStep(0);
       return;
     }
+    console.log('[PIPELINE] Starting agent pipeline animation...');
     const perStep = Math.max(300, durationMs / pipeline.length);
     const timer = setInterval(() => {
       setStep((s) => {
         if (s >= pipeline.length) {
           clearInterval(timer);
+          console.log('[PIPELINE] All agents completed');
           onComplete?.();
           return s;
         }
+        const agentKey = pipeline[s];
+        console.log(`[PIPELINE] Agent ${s + 1}/${pipeline.length}: ${agentKey} → active`);
         return s + 1;
       });
     }, perStep);
@@ -51,7 +55,7 @@ export default function AgentPipeline({ running, onComplete, durationMs = 12000 
         </div>
         <div>
           <p className="text-sm font-bold text-slate-900 dark:text-white">{t('Running the multi-agent pipeline')}</p>
-          <p className="text-xs text-slate-500 dark:text-slate-400">{t('17 specialized agents coordinating your trip…')}</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t('Specialized agents coordinating your trip…')}</p>
         </div>
       </div>
       <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">

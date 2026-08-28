@@ -19,8 +19,7 @@ import { useI18n } from '../utils/i18n';
 
 const STEPS = [
   { key: 'where', titleKey: 'Where & when', icon: MapPin },
-  { key: 'travelers', titleKey: 'Travelers', icon: Users },
-  { key: 'budget', titleKey: 'Budget', icon: Wallet },
+  { key: 'travelersBudget', titleKey: 'Travelers & Budget', icon: Users },
   { key: 'style', titleKey: 'Travel style', icon: Compass },
   { key: 'preferences', titleKey: 'Preferences', icon: UtensilsCrossed },
   { key: 'generate', titleKey: 'Generate', icon: Sparkles },
@@ -32,10 +31,11 @@ const initialForm = {
   suggestDestination: false,
   startDate: '',
   endDate: '',
-  adults: 1,
-  children: 0,
+  numTravelers: 1,
+  travelerType: 'solo',
   totalBudget: 50000,
   currency: 'INR',
+  accommodationType: 'budget',
   travelStyle: 'standard',
   interests: [],
   foodPreference: '',
@@ -74,7 +74,7 @@ export default function TripPlanner() {
       if (!form.startDate || !form.endDate) return t('Pick departure and return dates');
       if (new Date(form.endDate) < new Date(form.startDate)) return t('Return date must be after departure date');
     }
-    if (step === 2 && (!form.totalBudget || form.totalBudget <= 0)) return t('Enter a total budget');
+    if (step === 1 && (!form.totalBudget || form.totalBudget <= 0)) return t('Enter a total budget');
     return null;
   };
 
@@ -89,17 +89,23 @@ export default function TripPlanner() {
     if (err) return toast.error(err);
     setGenerating(true);
     setPipelineDone(false);
+    const startTime = Date.now();
+    console.log('[TRIP_PLANNER] Generating trip:', { destination: form.destination, origin: form.origin, startDate: form.startDate, endDate: form.endDate, totalBudget: form.totalBudget, travelStyle: form.travelStyle });
     try {
       const { data } = await tripApi.generate({
         ...form,
+        adults: form.numTravelers,
+        children: 0,
         title: form.title || undefined,
         // ISO dates for the backend validator
         startDate: new Date(form.startDate).toISOString(),
         endDate: new Date(form.endDate).toISOString(),
       });
+      console.log(`[TRIP_PLANNER] Trip generated successfully in ${Date.now() - startTime}ms, tripId: ${data.data.trip._id}`);
       toast.success(t('Trip planned by the agents! 🎉'));
       navigate(`/itinerary/${data.data.trip._id}`);
     } catch (e) {
+      console.error(`[TRIP_PLANNER] Trip generation failed after ${Date.now() - startTime}ms:`, e.message);
       toast.error(errorMessage(e, t('Trip generation failed')));
     } finally {
       setGenerating(false);
@@ -182,34 +188,24 @@ export default function TripPlanner() {
 
             {step === 1 && (
               <div className="space-y-5">
-                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t("Who's traveling?")}</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t('Travelers & Budget')}</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Input label={t('Adults')} type="number" min={1} max={20} value={form.adults} onChange={(e) => set({ adults: Number(e.target.value) || 1 })} />
-                  <Input label={t('Children')} type="number" min={0} max={20} value={form.children} onChange={(e) => set({ children: Number(e.target.value) || 0 })} />
+                  <Input label={t('Number of travelers')} type="number" min={1} max={50} value={form.numTravelers} onChange={(e) => set({ numTravelers: Number(e.target.value) || 1 })} />
+                  <Select
+                    label={t('Traveler type')}
+                    value={form.travelerType}
+                    onChange={(e) => set({ travelerType: e.target.value })}
+                    options={['solo', 'couple', 'family', 'friends', 'business']}
+                  />
                 </div>
-                <Field label={t('Activity level')}>
-                  <div className="flex gap-2">
-                    {['relaxed', 'moderate', 'active'].map((l) => (
-                      <button
-                        key={l}
-                        type="button"
-                        onClick={() => set({ activityLevel: l })}
-                        className={cn('btn capitalize', form.activityLevel === l ? 'btn-primary' : 'btn-secondary')}
-                      >
-                        {l}
-                      </button>
-                    ))}
-                  </div>
-                </Field>
-              </div>
-            )}
-
-            {step === 2 && (
-              <div className="space-y-5">
-                <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t("What's your budget?")}</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Input label={t('Total budget')} type="number" min={0} value={form.totalBudget} onChange={(e) => set({ totalBudget: Number(e.target.value) })} />
-                  <Select label={t('Currency')} value={form.currency} onChange={(e) => set({ currency: e.target.value })} options={CURRENCIES} />
+                  <Input label={t('Total budget (INR)')} type="number" min={0} value={form.totalBudget} onChange={(e) => set({ totalBudget: Number(e.target.value) })} />
+                  <Select
+                    label={t('Accommodation type')}
+                    value={form.accommodationType}
+                    onChange={(e) => set({ accommodationType: e.target.value })}
+                    options={['budget', 'standard', 'luxury', 'hostel', 'boutique', 'resort', 'homestay']}
+                  />
                 </div>
                 <p className="rounded-xl bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-950/50 dark:text-amber-300">
                   💡 {t('The Budget Agent allocates this across transport, hotels, food, activities and an emergency reserve — and finds cheaper alternatives if your plan goes over.')}
@@ -217,7 +213,7 @@ export default function TripPlanner() {
               </div>
             )}
 
-            {step === 3 && (
+            {step === 2 && (
               <div className="space-y-5">
                 <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t('Choose your travel style')}</h2>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -259,7 +255,7 @@ export default function TripPlanner() {
               </div>
             )}
 
-            {step === 4 && (
+            {step === 3 && (
               <div className="space-y-5">
                 <h2 className="text-lg font-extrabold text-slate-900 dark:text-white">{t('Preferences')}</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -267,7 +263,7 @@ export default function TripPlanner() {
                     label={t('Food preference')}
                     value={form.foodPreference}
                     onChange={(e) => set({ foodPreference: e.target.value })}
-                    options={['', 'vegetarian', 'vegan', 'non-vegetarian', 'jain', 'halal']}
+                    options={['', 'vegetarian', 'non-vegetarian', 'any']}
                   />
                   <Select
                     label={t('Hotel preference')}
@@ -279,7 +275,7 @@ export default function TripPlanner() {
                     label={t('Transport preference')}
                     value={form.transportPreference}
                     onChange={(e) => set({ transportPreference: e.target.value })}
-                    options={['', 'flight', 'train', 'bus', 'public', 'drive']}
+                    options={['', 'flight', 'train', 'bus', 'car', 'public', 'drive']}
                   />
                   <Field label={t('Accessibility requirements')}>
                     <input
@@ -293,13 +289,13 @@ export default function TripPlanner() {
               </div>
             )}
 
-            {step === 5 && (
+            {step === 4 && (
               <div className="space-y-6">
                 <div className="rounded-2xl bg-gradient-to-br from-brand-600 to-brand-900 p-6 text-white">
                   <h2 className="text-lg font-extrabold">{t('Ready to generate')} 🚀</h2>
                   <p className="mt-1 text-sm text-brand-100">
-                    {form.destination || t('A suggested destination')} · {form.startDate} → {form.endDate} · {form.adults} {t('adult(s)')}
-                    · {form.currency} {Number(form.totalBudget).toLocaleString()} · {form.travelStyle}
+                    {form.destination || t('A suggested destination')} · {form.startDate} → {form.endDate} · {form.numTravelers} {t('traveler(s)')}
+                    · {form.travelerType} · ₹{Number(form.totalBudget).toLocaleString()} · {form.accommodationType}
                   </p>
                 </div>
                 <Button onClick={generate} loading={generating} className="w-full py-3.5 text-base">
@@ -308,7 +304,7 @@ export default function TripPlanner() {
               </div>
             )}
 
-            {step < 5 && (
+            {step < 4 && (
               <div className="mt-8 flex items-center justify-between">
                 <Button variant="ghost" onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0}>
                   <ArrowLeft className="h-4 w-4" /> {t('Back')}

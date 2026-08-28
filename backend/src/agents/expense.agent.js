@@ -1,5 +1,6 @@
 import { BaseAgent } from './base.agent.js';
 import { EXPENSE_AGENT_PROMPT } from '../prompts/agentPrompts.js';
+import logger from '../utils/logger.js';
 
 /**
  * Expense Agent: analyzes the user's REAL recorded expenses against the
@@ -12,6 +13,8 @@ class ExpenseAgent extends BaseAgent {
   }
 
   async run({ expenses, allocation, totalBudget, currency, userId }) {
+    logger.entry('[AGENT:expense]', 'run', { expenseCount: expenses?.length || 0, totalBudget, currency });
+    const started = Date.now();
     const result = await this.think({
       prompt: `Recorded expenses:
 ${JSON.stringify(expenses, null, 2)}
@@ -46,6 +49,7 @@ Identify overspending categories and realistic adjustments.`,
         isEstimate: true,
       };
     }
+    logger.exit('[AGENT:expense]', 'run', { status: result.status, overspendingCategories: result.data?.overspendingCategories?.length || 0, latencyMs: Date.now() - started });
     return result;
   }
 }

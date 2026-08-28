@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import logger from '../utils/logger.js';
 import authRoutes from './auth.routes.js';
 import userRoutes from './user.routes.js';
 import tripRoutes from './trip.routes.js';
@@ -25,6 +26,8 @@ import healthRoutes from './health.routes.js';
 
 const router = Router();
 
+logger.info('[ROUTES] Mounting API routes...');
+
 router.use('/health', healthRoutes);
 router.use('/auth', authRoutes);
 router.use('/users', userRoutes);
@@ -48,5 +51,7 @@ router.use('/emergency', emergencyRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/translate', translateRoutes);
 router.use('/admin', adminRoutes);
+
+logger.info('[ROUTES] All 23 API routes mounted');
 
 export default router;

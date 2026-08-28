@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import env from '../config/env.js';
 import extractJSON from '../utils/jsonExtract.js';
 import AiUsageLog from '../models/AiUsageLog.js';
+import logger from '../utils/logger.js';
 
 let client = null;
 if (env.GEMINI_API_KEY) {
@@ -67,8 +68,10 @@ async function recordUsage({ userId, agent, action, status, error, latencyMs }) 
  * callers can degrade gracefully when the AI is not configured.
  */
 export async function generateText({ prompt, system, agent = 'generic', action = 'generate', userId = null }) {
+  logger.entry('[GEMINI]', 'generateText', { agent, action, promptLength: prompt?.length || 0, hasSystem: Boolean(system) });
   if (!client) {
     await recordUsage({ userId, agent, action, status: 'unavailable', error: 'GEMINI_API_KEY not configured', latencyMs: 0 });
+    logger.warn('[GEMINI] Not configured — GEMINI_API_KEY missing');
     return {
       success: false,
       configured: false,
@@ -84,10 +87,14 @@ export async function generateText({ prompt, system, agent = 'generic', action =
     parts.push(prompt);
     const result = await withRetry(() => m.generateContent(parts));
     const text = result.response?.text?.() || '';
-    await recordUsage({ userId, agent, action, status: 'success', latencyMs: Date.now() - started });
+    const latencyMs = Date.now() - started;
+    await recordUsage({ userId, agent, action, status: 'success', latencyMs });
+    logger.exit('[GEMINI]', 'generateText', { status: 'success', latencyMs, agent, action, textLength: text.length });
     return { success: true, configured: true, text, message: 'AI response generated' };
   } catch (err) {
-    await recordUsage({ userId, agent, action, status: 'error', error: err.message, latencyMs: Date.now() - started });
+    const latencyMs = Date.now() - started;
+    await recordUsage({ userId, agent, action, status: 'error', error: err.message, latencyMs });
+    logger.error(`[GEMINI] generateText failed (${latencyMs}ms): ${err.message}`);
     return {
       success: false,
       configured: true,
@@ -101,12 +108,18 @@ export async function generateText({ prompt, system, agent = 'generic', action =
  * Generate structured JSON from Gemini with robust parsing.
  */
 export async function generateJSON({ prompt, system, agent = 'generic', action = 'generate', userId = null }) {
+  logger.entry('[GEMINI]', 'generateJSON', { agent, action });
   const res = await generateText({ prompt, system, agent, action, userId });
-  if (!res.success) return { ...res, data: null };
+  if (!res.success) {
+    logger.warn(`[GEMINI] generateJSON failed: ${res.message}`);
+    return { ...res, data: null };
+  }
   const data = extractJSON(res.text);
   if (data === null) {
+    logger.warn(`[GEMINI] generateJSON: AI did not return valid JSON (text length: ${res.text?.length || 0})`);
     return { ...res, success: false, data: null, message: 'AI did not return valid JSON' };
   }
+  logger.info(`[GEMINI] generateJSON success — extracted ${typeof data === 'object' ? Object.keys(data).length : 'non-object'} keys`);
   return { ...res, data };
 }
 

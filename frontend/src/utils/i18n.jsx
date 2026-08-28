@@ -89,8 +89,8 @@ export const DICT = {
   'Your next trip, planned by AI': { en: 'Your next trip, planned by AI', hi: 'आपकी अगली यात्रा, एआई द्वारा नियोजित', mr: 'तुमची पुढची सहल, एआयद्वारे नियोजित' },
   'Start planning trips with AI agents': { en: 'Start planning trips with AI agents', hi: 'एआई एजेंट्स के साथ यात्रा की योजना शुरू करें', mr: 'एआय एजंट्ससह सहलीचे नियोजन सुरू करा' },
   'Everything a traveler needs': { en: 'Everything a traveler needs', hi: 'यात्री के लिए सब कुछ', mr: 'प्रवाशाला हवे ते सर्व' },
-  '17 AI agents': { en: '17 AI agents', hi: '17 एआई एजेंट', mr: '17 एआय एजंट्स' },
-  '17 specialized agents coordinating your trip…': { en: '17 specialized agents coordinating your trip…', hi: '17 विशेष एजेंट आपकी यात्रा का समन्वय कर रहे हैं…', mr: '17 विशेष एजंट तुमच्या सहलीचे समन्वय करत आहेत…' },
+  'AI agents': { en: 'AI agents', hi: 'एआई एजेंट', mr: 'एआय एजंट्स' },
+  'Specialized agents coordinating your trip…': { en: 'Specialized agents coordinating your trip…', hi: 'विशेष एजेंट आपकी यात्रा का समन्वय कर रहे हैं…', mr: 'विशेष एजंट तुमच्या सहलीचे समन्वय करत आहेत…' },
   'Create an account, set a budget, and watch the agent pipeline build your day-by-day plan.': { en: 'Create an account, set a budget, and watch the agent pipeline build your day-by-day plan.', hi: 'खाता बनाएं, बजट निर्धारित करें, और एजेंट पाइपलाइन को आपकी दिन-प्रतिदिन की योजना बनाते देखें।', mr: 'खाते तयार करा, बजेट निश्चित करा आणि एजंट पाइपलाइनला तुमची दैनंदिन योजना बनवताना पहा.' },
   'Get started': { en: 'Get started', hi: 'शुरू करें', mr: 'सुरू करा' },
   'Start planning free': { en: 'Start planning free', hi: 'मुफ्त योजना शुरू करें', mr: 'विनामूल्य नियोजन सुरू करा' },
@@ -196,7 +196,7 @@ export const DICT = {
   'Ask the AI chatbot': { en: 'Ask the AI chatbot', hi: 'एआई चैटबॉट से पूछें', mr: 'एआय चॅटबॉटला विचारा' },
   'Contextual assistance': { en: 'Contextual assistance', hi: 'प्रासंगिक सहायता', mr: 'संदर्भानुसार मदत' },
   'Agent pipeline': { en: 'Agent pipeline', hi: 'एजेंट पाइपलाइन', mr: 'एजंट पाइपलाइन' },
-  '17 agents explained': { en: '17 agents explained', hi: '17 एजेंट समझाए गए', mr: '17 एजंट्स समजावले' },
+  'Agents explained': { en: 'Agents explained', hi: 'एजेंट समझाए गए', mr: 'एजंट्स समजावले' },
 
   // ── Trip Planner ──
   'A multi-step form that feeds the multi-agent pipeline.': { en: 'A multi-step form that feeds the multi-agent pipeline.', hi: 'एक बहु-चरणीय फ़ॉर्म जो मल्टी-एजेंट पाइपलाइन को फ़ीड करता है।', mr: 'मल्टी-एजंट पाइपलाइनला फीड करणारा बहु-चरणीय फॉर्म.' },
