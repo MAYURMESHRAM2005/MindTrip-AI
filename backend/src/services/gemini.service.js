@@ -21,30 +21,114 @@ function model() {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// ── Daily quota tracking ──────────────────────────────────────────────
+// Google's free tier: 20 requests/day/model. Track in memory so we don't
+// waste retries when the daily cap is already hit.
+let dailyRequestCount = 0;
+let dailyResetDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+let dailyQuotaExhausted = false;
+
+function trackDailyUsage() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== dailyResetDate) {
+    dailyResetDate = today;
+    dailyRequestCount = 0;
+    dailyQuotaExhausted = false;
+  }
+  dailyRequestCount++;
+}
+
+function isDailyQuotaExhausted() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== dailyResetDate) {
+    dailyResetDate = today;
+    dailyRequestCount = 0;
+    dailyQuotaExhausted = false;
+  }
+  return dailyQuotaExhausted;
+}
+
+function markDailyQuotaExhausted() {
+  dailyQuotaExhausted = true;
+  logger.warn(`[GEMINI] Daily quota exhausted (${dailyRequestCount} requests today). No more retries today.`);
+}
+
 function isRateLimited(err) {
   const msg = String(err?.message || err || '');
-  return /429|quota|resource_exhausted|rate limit/i.test(msg);
+  return /429|resource_exhausted|rate limit/i.test(msg);
+}
+
+function isDailyQuotaError(err) {
+  const msg = String(err?.message || err || '');
+  return /quota|GenerateRequestsPerDayPerProjectPerModel/i.test(msg);
 }
 
 /**
- * Retry a Gemini call with exponential backoff when the provider rate-limits
- * us (Google's free tier allows ~20 requests/min for gemini-3.5-flash).
+ * Parse the retry delay from Google's error response.
+ * Google includes a retryDelay in the error details, e.g. "27s".
  */
-async function withRetry(fn, retries = 2) {
+function parseRetryDelay(err) {
+  const msg = String(err?.message || err || '');
+  // Look for "retryDelay":"27s" or "Please retry in 27.09s"
+  const retryMatch = msg.match(/retryDelay["\s:]+(\d+(?:\.\d+)?s)/i) || msg.match(/retry in (\d+(?:\.\d+)?s)/i);
+  if (retryMatch) {
+    const seconds = parseFloat(retryMatch[1]);
+    if (!Number.isNaN(seconds) && seconds > 0) return Math.ceil(seconds * 1000);
+  }
+  return null;
+}
+
+/**
+ * Retry a Gemini call with exponential backoff.
+ * - For daily quota errors: no retry (the cap is hit for the day)
+ * - For rate-limit errors: retry with Google's suggested delay, up to 3 attempts
+ */
+async function withRetry(fn, retries = 3) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
+      trackDailyUsage();
       return await fn();
     } catch (err) {
       lastErr = err;
+
+      // Daily quota — no point retrying, the cap is hit for today
+      if (isDailyQuotaError(err)) {
+        markDailyQuotaExhausted();
+        throw err;
+      }
+
+      // Rate limited — retry with Google's suggested delay
       if (isRateLimited(err) && attempt < retries) {
-        await sleep(1500 * (attempt + 1));
+        const suggestedDelay = parseRetryDelay(err);
+        const delay = suggestedDelay || (3000 * Math.pow(2, attempt)); // 3s, 6s, 12s
+        logger.info(`[GEMINI] Rate limited (attempt ${attempt + 1}/${retries}), retrying in ${Math.round(delay / 1000)}s...`);
+        await sleep(delay);
         continue;
       }
+
       throw err;
     }
   }
   throw lastErr;
+}
+
+/**
+ * Get current daily usage stats for monitoring.
+ */
+export function getDailyUsage() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== dailyResetDate) {
+    dailyResetDate = today;
+    dailyRequestCount = 0;
+    dailyQuotaExhausted = false;
+  }
+  return {
+    date: dailyResetDate,
+    requestsToday: dailyRequestCount,
+    quotaExhausted: dailyQuotaExhausted,
+    limit: 20, // Gemini free tier daily limit
+  };
 }
 
 async function recordUsage({ userId, agent, action, status, error, latencyMs }) {
@@ -77,6 +161,19 @@ export async function generateText({ prompt, system, agent = 'generic', action =
       configured: false,
       text: null,
       message: 'Gemini AI is not configured. Add GEMINI_API_KEY to backend/.env',
+    };
+  }
+  // Check daily quota before making the request
+  if (isDailyQuotaExhausted()) {
+    const usage = getDailyUsage();
+    await recordUsage({ userId, agent, action, status: 'quota_exhausted', error: 'Daily quota exhausted', latencyMs: 0 });
+    logger.warn(`[GEMINI] Daily quota exhausted (${usage.requestsToday}/${usage.limit}). Skipping request.`);
+    return {
+      success: false,
+      configured: true,
+      quotaExhausted: true,
+      text: null,
+      message: `Gemini daily quota exhausted (${usage.requestsToday}/${usage.limit} requests today). Try again tomorrow or upgrade your plan at https://ai.google.dev/pricing`,
     };
   }
   const started = Date.now();
@@ -158,4 +255,4 @@ export async function analyzeImage({ imageBase64, mimeType, prompt, userId = nul
   }
 }
 
-export default { generateText, generateJSON, analyzeImage, geminiConfigured };
+export default { generateText, generateJSON, analyzeImage, geminiConfigured, getDailyUsage };

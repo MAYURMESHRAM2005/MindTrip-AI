@@ -28,6 +28,10 @@ import budgetService from './budget.service.js';
 
 const RESTAURANT_PRICE_BY_LEVEL = { 0: 150, 1: 350, 2: 700, 3: 1400, 4: 2500 };
 const ATTRACTION_ENTRY_DEFAULT = { amount: 0, isEstimate: true };
+/**
+ * The current date for freshness checks.
+ */
+const NOW_ISO = new Date().toISOString();
 /** Two places closer than this are treated as the same geographic area. */
 const AREA_RADIUS_KM = 12;
 /** Radius used to attach restaurants/nightlife to a day's area. */
@@ -154,7 +158,10 @@ export function clusterAreas(attractions = [], destination = '') {
 /*  Cost math (deterministic, traveller-aware)                         */
 /* ------------------------------------------------------------------ */
 
-function restaurantMealCost(r, meal, partySize) {
+function restaurantMealCost(r, meal, partySize, currency) {
+  const cur = currency || 'INR';
+  // Geoapify does not provide actual menu prices. Use priceLevel as a proxy
+  // and ALWAYS mark as estimate — never present as a real API price.
   const base = RESTAURANT_PRICE_BY_LEVEL[r.priceLevel ?? 1] ?? 350;
   let perPerson = base;
   if (meal === 'breakfast') perPerson = Math.max(80, Math.round(base * 0.6));
@@ -163,29 +170,36 @@ function restaurantMealCost(r, meal, partySize) {
   return {
     amount,
     perPerson,
-    currency: 'INR',
+    currency: cur,
     isEstimate: true,
-    estimateNote: `Estimated ~${perPerson}/person × ${partySize} traveller(s)`,
+    estimateNote: `Estimated ~${cur} ${perPerson}/person × ${partySize} traveller(s) based on restaurant price level ${r.priceLevel ?? 'unknown'}. Actual menu prices not available from provider.`,
+    source: 'geoapify-pricelevel-estimate',
+    fetchedAt: NOW_ISO,
   };
 }
 
 function entryFeeEstimateFor(attraction) {
+  // Geoapify does not provide entry fee data. All fees are estimates
+  // based on attraction type. Never present these as real API prices.
   const name = String(attraction?.name || '').toLowerCase();
   const types = (attraction?.types || []).join(' ').toLowerCase();
   if (/museum|gallery|monument|fort|palace|temple|church|mosque|zoo|park|garden|waterfall/.test(name + ' ' + types)) {
-    return { amount: 200, isEstimate: true, estimateNote: 'Typical entry fee - confirm locally' };
+    return { amount: 200, isEstimate: true, estimateNote: 'Estimated typical entry fee - no live pricing available from provider. Confirm locally.' };
   }
-  return { amount: 0, isEstimate: true, estimateNote: 'Entry fee unknown - confirm locally' };
+  return { amount: 0, isEstimate: true, estimateNote: 'Entry fee unknown - no live pricing available from provider. Confirm locally.' };
 }
 
 function attractionCost(a, currency, partySize) {
-  const fee = entryFeeEstimateFor(a).amount;
+  const fee = entryFeeEstimateFor(a);
+  const perPerson = fee.amount;
   return {
-    amount: Math.round(fee * partySize * 100) / 100,
-    perPerson: fee,
+    amount: Math.round(perPerson * partySize * 100) / 100,
+    perPerson,
     currency,
     isEstimate: true,
-    estimateNote: fee ? `Estimated ${fee}/person × ${partySize} traveller(s)` : 'Free / entry fee unknown - confirm locally',
+    estimateNote: perPerson ? `${fee.estimateNote} × ${partySize} traveller(s)` : fee.estimateNote,
+    source: 'estimate',
+    fetchedAt: NOW_ISO,
   };
 }
 
@@ -423,6 +437,7 @@ export function buildDaysPlan({
     const activities = [];
 
     // Shared factory for a real place activity.
+    // Every activity includes fetchedAt for data source transparency.
     const placeActivity = ({ time, title, place, description, category, address, coordinates, cost, source, isLive, dataStatus, priority, slot, bookingUrl = '', travel }) => ({
       time,
       slot,
@@ -439,6 +454,7 @@ export function buildDaysPlan({
       dataStatus,
       priority,
       travel,
+      fetchedAt: NOW_ISO,
     });
 
     // ---- Arrival day: outbound transport + check-in ----
@@ -507,7 +523,7 @@ export function buildDaysPlan({
           place: r.name,
           description: `Start the day right - rating ${r.rating ?? 'n/a'}.${reuseNote(breakfast) ? ` ${reuseNote(breakfast)}` : ''}`,
           category: 'restaurant', address: r.address || '', coordinates: r.coordinates || null,
-          cost: restaurantMealCost(r, 'breakfast', partySize),
+          cost: restaurantMealCost(r, 'breakfast', partySize, currency),
           source: 'geoapify', isLive: true, dataStatus: 'live', priority: 2,
         }));
       } else {
@@ -566,7 +582,7 @@ export function buildDaysPlan({
           place: r.name,
           description: `Cuisine match for ${prefs?.foodPreference || 'your preference'}. Rating ${r.rating ?? 'n/a'}.${reuseNote(lunch) ? ` ${reuseNote(lunch)}` : ''}`,
           category: 'restaurant', address: r.address || '', coordinates: r.coordinates || null,
-          cost: restaurantMealCost(r, 'lunch', partySize),
+          cost: restaurantMealCost(r, 'lunch', partySize, currency),
           source: 'geoapify', isLive: true, dataStatus: 'live', priority: 1,
         }));
       } else {
@@ -648,7 +664,7 @@ export function buildDaysPlan({
           place: r.name,
           description: `Rating ${r.rating ?? 'n/a'}. ${prefs?.foodPreference ? `Matches ${prefs.foodPreference} preference.` : ''}${reuseNote(dinner) ? ` ${reuseNote(dinner)}` : ''}`,
           category: 'restaurant', address: r.address || '', coordinates: r.coordinates || null,
-          cost: restaurantMealCost(r, 'dinner', partySize),
+          cost: restaurantMealCost(r, 'dinner', partySize, currency),
           source: 'geoapify', isLive: true, dataStatus: 'live', priority: 1,
         }));
       } else {
@@ -1223,6 +1239,7 @@ export function buildItineraryExtras({
       amenities: Array.isArray(hotelRecommended.amenities) && hotelRecommended.amenities.length ? hotelRecommended.amenities : ['Free Wi-Fi', 'AC'],
       isLive: hotelsLive,
       source: hotelsLive ? 'amadeus-hotels' : 'estimate',
+      fetchedAt: new Date().toISOString(),
     });
   }
 
@@ -1237,6 +1254,8 @@ export function buildItineraryExtras({
       rating: r.rating ?? null,
       averageCost: RESTAURANT_PRICE_BY_LEVEL[level] ?? 350,
       averageCostPerPerson: Math.round(RESTAURANT_PRICE_BY_LEVEL[level] ?? 350),
+      averageCostIsEstimate: true,
+      averageCostNote: 'Estimated from Geoapify priceLevel — actual menu prices not available from provider',
       veg: Boolean(prefs?.foodPreference && /veg|jain|vegan/i.test(prefs.foodPreference)),
       nonVeg: Boolean(prefs?.foodPreference && /non.?veg|chicken|meat|seafood/i.test(prefs.foodPreference)),
       vegan: Boolean(prefs?.foodPreference && /vegan|jain/i.test(prefs.foodPreference)),
@@ -1246,6 +1265,7 @@ export function buildItineraryExtras({
       address: r.address || '',
       coordinates: r.coordinates || null,
       isLive: restaurantsLive,
+      source: 'geoapify',
     };
   });
 
@@ -1262,6 +1282,8 @@ export function buildItineraryExtras({
     name: a.name || `Attraction ${i + 1}`,
     rating: a.rating ?? null,
     entryFee: entryFeeEstimate(a, currency),
+    entryFeeIsEstimate: true,
+    entryFeeNote: 'Estimated — no live entry fee pricing available from Geoapify provider',
     openingHours: a.openingHours || null,
     timeRequired: visitHoursEstimate(a),
     distanceKm: attractionKm(a),
@@ -1269,6 +1291,7 @@ export function buildItineraryExtras({
     types: (a.types || []).slice(0, 3),
     address: a.address || '',
     isLive: attractionsLive,
+    source: 'geoapify',
   });
   const topAttractions = attractionList.slice(0, 6).map(attractionCard);
   const nearbyAttractions = attractionList.slice(0, 10).map(attractionCard);
@@ -1338,6 +1361,54 @@ export function buildItineraryExtras({
       isLive: false,
       bookingAdvice: 'Estimate from distance - refuel and check tolls en route',
     };
+  }
+
+  // Transport intelligence data — multi-modal journeys, alternatives, ground transfers
+  const modesChecked = transportResult?.data?.modesChecked || [];
+  const transportMessage = transportResult?.data?.message || '';
+  const transportAlternatives = Array.isArray(transportResult?.data?.offers) ? transportResult.data.offers : [];
+  if (modesChecked.length > 0 || transportMessage) {
+    transportPlan.modesChecked = modesChecked;
+    transportPlan.fallbackMessage = transportMessage;
+    transportPlan.alternativesCount = transportAlternatives.length;
+  }
+
+  // Multi-modal journey details from Transport Intelligence Engine
+  const groundTransfer = transportResult?.data?.groundTransfer || null;
+  const destinationTransfer = transportResult?.data?.destinationTransfer || null;
+  const totalDuration = transportResult?.data?.totalDuration || null;
+  const totalCost = transportResult?.data?.totalCost || null;
+  const recommendation = transportResult?.data?.recommendation || '';
+  const originGeo = transportResult?.data?.originGeo || null;
+  const destGeo = transportResult?.data?.destGeo || null;
+
+  if (groundTransfer || destinationTransfer || totalDuration || totalCost) {
+    transportPlan.groundTransfer = groundTransfer;
+    transportPlan.destinationTransfer = destinationTransfer;
+    transportPlan.totalDuration = totalDuration;
+    transportPlan.totalCost = totalCost;
+    transportPlan.totalCostCurrency = currency;
+    transportPlan.recommendation = recommendation;
+    transportPlan.originGeo = originGeo;
+    transportPlan.destGeo = destGeo;
+    // Override estimatedFare with totalCost when available (multi-modal)
+    if (totalCost != null) {
+      transportPlan.estimatedFare = null; // totalCost replaces per-leg fare
+    }
+  }
+
+  // Origin/destination for multi-modal display
+  if (request.origin) {
+    transportPlan.origin = request.origin;
+    transportPlan.destination = request.destination;
+  }
+
+  // Main transport detail label for multi-modal display
+  if (selected) {
+    transportPlan.mainTransportLabel = selected.airline
+      ? `${selected.airline} ${selected.flightNumber || ''}`.trim()
+      : selected.trainName || selected.operator || '';
+    transportPlan.mainTransportDetail = selected.departure || selected.departAt || '';
   }
 
   /* ---- 7. Daily weather (forecast + today's sunrise/sunset) ---- */
@@ -1448,19 +1519,26 @@ export function buildItineraryExtras({
     remaining: d.remainingBudget,
   }));
 
+  const fetchedAt = new Date().toISOString();
+
   return {
     tripSummary,
     budgetPlanning,
     budgetSummary: budgetUtil,
     dayAreas,
-    hotels,
-    restaurants,
-    attractions: { top: topAttractions, hiddenGems: hiddenGemsCards, nearby: nearbyAttractions },
-    transportPlan,
+    hotels: hotels.map((h) => ({ ...h, fetchedAt })),
+    restaurants: restaurants.map((r) => ({ ...r, fetchedAt })),
+    attractions: {
+      top: topAttractions.map((a) => ({ ...a, fetchedAt })),
+      hiddenGems: hiddenGemsCards.map((a) => ({ ...a, fetchedAt })),
+      nearby: nearbyAttractions.map((a) => ({ ...a, fetchedAt })),
+    },
+    transportPlan: { ...transportPlan, fetchedAt },
     weatherDaily,
     weatherNote: current?.sunrise ? 'Sunrise & sunset shown are today\'s values (per-day times aren\'t in the forecast feed).' : '',
     travelTips,
     recommendations,
     mapData: { center, markers, routes },
+    dataFetchedAt: fetchedAt,
   };
 }

@@ -348,6 +348,9 @@ function sanitizeItinerary(raw) {
       // priority number
       act.priority = Number(act.priority) || 1;
 
+      // fetchedAt — data source transparency
+      if (!act.fetchedAt) act.fetchedAt = new Date().toISOString();
+
       // Coordinates — ensure valid shape
       if (act.coordinates != null && typeof act.coordinates === 'object') {
         const lat = Number(act.coordinates.lat);
@@ -464,17 +467,20 @@ function buildContext(data) {
     accommodation: normalizeAccommodation(accommodation),
     transport: normalizeTransport(transport),
     attractions: (attractions || []).slice(0, 12).map((a) => ({
-      name: a.name || '', type: (a.types || []).join(', '), address: a.address || '',
+      name: a.name || '', placeId: a.placeId || '', type: (a.types || []).join(', '), address: a.address || '',
       rating: a.rating, priceLevel: a.priceLevel, coordinates: a.coordinates,
-      distanceMeters: a.distanceMeters,
+      distanceMeters: a.distanceMeters, source: 'geoapify',
+      note: 'Entry fees are estimates — no live pricing from provider',
     })),
     restaurants: (restaurants || []).slice(0, 10).map((r) => ({
-      name: r.name || '', type: (r.types || []).join(', '), address: r.address || '',
+      name: r.name || '', placeId: r.placeId || '', type: (r.types || []).join(', '), address: r.address || '',
       rating: r.rating, priceLevel: r.priceLevel, coordinates: r.coordinates,
+      source: 'geoapify',
+      note: 'Menu prices not available — costs are estimates based on priceLevel',
     })),
     nightlife: (nightlife || []).slice(0, 8).map((n) => ({
-      name: n.name || '', type: (n.types || []).join(', '), address: n.address || '',
-      coordinates: n.coordinates,
+      name: n.name || '', placeId: n.placeId || '', type: (n.types || []).join(', '), address: n.address || '',
+      coordinates: n.coordinates, source: 'geoapify',
     })),
     traffic: {
       isLive: traffic.isLive || false,
@@ -580,7 +586,7 @@ export async function generateItinerary(data) {
 
   // 2. Construct the single Gemini prompt
   const systemPrompt = buildSystemPrompt();
-  const userPrompt = buildUserPrompt(context);
+  const userPrompt = buildUserPrompt(context, data);
 
   // 3. Make the ONE Gemini API request with timeout
   const result = await callGeminiWithTimeout({
@@ -666,6 +672,7 @@ export async function generateItinerary(data) {
 
 /**
  * Post-validation: mark any Gemini-invented data as unavailable.
+ * Also ensures every activity has proper metadata (fetchedAt, source, cost fields).
  */
 function enforceDataIntegrity(itinerary, context) {
   const availableRestaurants = new Set(
@@ -677,6 +684,7 @@ function enforceDataIntegrity(itinerary, context) {
   const hasLiveWeather = context.weather?.available && context.weather?.current;
   const hasLiveHotels = context.accommodation?.available && context.accommodation?.isLive;
   const hasLiveTransport = context.transport?.available && context.transport?.isLive;
+  const now = new Date().toISOString();
 
   for (const day of itinerary.days || []) {
     if (!hasLiveWeather && day.weather) {
@@ -690,12 +698,22 @@ function enforceDataIntegrity(itinerary, context) {
     }
 
     for (const activity of day.activities || []) {
+      // Ensure every activity has fetchedAt metadata
+      if (!activity.fetchedAt) activity.fetchedAt = now;
+
       if (activity.category === 'restaurant') {
         const name = (activity.place || activity.title || '').toLowerCase();
         if (name && !availableRestaurants.has(name)) {
           activity.dataStatus = 'unavailable';
           activity.isLive = false;
           activity.description = `${activity.description || 'Restaurant'} (unverified — not in live data)`;
+        }
+        // Restaurant costs from Geoapify are ALWAYS estimates (no real menu prices)
+        if (activity.cost) {
+          activity.cost.isEstimate = true;
+          if (!activity.cost.estimateNote) {
+            activity.cost.estimateNote = 'Estimated based on restaurant price level — actual menu prices not available from provider';
+          }
         }
       }
 
@@ -707,6 +725,13 @@ function enforceDataIntegrity(itinerary, context) {
             activity.dataStatus = 'unavailable';
             activity.isLive = false;
             activity.description = `${activity.description || 'Activity'} (unverified — not in live data)`;
+          }
+        }
+        // Attraction entry fees are ALWAYS estimates (no live pricing from Geoapify)
+        if (activity.cost) {
+          activity.cost.isEstimate = true;
+          if (!activity.cost.estimateNote) {
+            activity.cost.estimateNote = 'Estimated entry fee — no live pricing available from provider';
           }
         }
       }
@@ -855,7 +880,21 @@ Return a JSON object with this exact structure:
 }
 
 /** Build the user prompt with the complete context. */
-function buildUserPrompt(context) {
+function buildUserPrompt(context, rawData) {
+  // Build a data-source summary so Gemini knows which items are real vs estimated
+  const dataSourceSummary = {
+    weatherSource: rawData.weather?.data?.provider || 'unavailable',
+    hotelSource: rawData.accommodation?.data?.source || 'unavailable',
+    hotelIsLive: rawData.accommodation?.data?.isLive || false,
+    flightSource: rawData.transport?.data?.isLive ? (rawData.transport?.data?.selected?.provider || 'live') : 'unavailable',
+    attractionCount: (rawData.attractions || []).length,
+    attractionSource: 'geoapify',
+    restaurantCount: (rawData.restaurants || []).length,
+    restaurantSource: 'geoapify',
+    nightlifeCount: (rawData.nightlife || []).length,
+    note: 'All prices from Geoapify are estimates based on priceLevel. Actual menu prices and entry fees are NOT available from this provider.',
+  };
+
   return `You are the final itinerary planner for TravelMind AI. Your task is to create a personalized day-wise travel itinerary using ONLY the verified travel data provided below.
 
 STRICT RULES:
@@ -874,6 +913,16 @@ STRICT RULES:
 - Do not claim availability unless it exists in the provided data.
 - Create a practical day-wise itinerary.
 - Return ONLY valid JSON matching the required schema.
+- Every attraction must appear on ONLY ONE day (no repeats across days).
+- Hotels can repeat across days (same hotel for multi-night stay).
+- Restaurants should not repeat across days when possible.
+- For each activity, include "fetchedAt" timestamp and "source" field.
+- Restaurant prices are ESTIMATES based on Geoapify priceLevel — mark isEstimate=true.
+- Attraction entry fees are ESTIMATES — mark isEstimate=true.
+- Transport prices come from the provider when available.
+
+DATA SOURCE TRANSPARENCY:
+${JSON.stringify(dataSourceSummary, null, 2)}
 
 The input contains:
 

@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   Plane, TrainFront, Bus, Hotel, UtensilsCrossed, Landmark, Activity,
   CloudSun, AlertTriangle, Clock, MapPin, Navigation, Map, Moon, Wallet,
+  RefreshCw, Database, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { DataStatusBadge } from './ui/Badge';
 import { formatCurrency, formatDateShort } from '../utils/format';
@@ -26,8 +27,10 @@ const CATEGORY_COLOR = {
 
 function ActivityRow({ activity, currency }) {
   const { t } = useI18n();
+  const [showMeta, setShowMeta] = useState(false);
   const Icon = CATEGORY_ICON[activity.category] || Activity;
   const color = CATEGORY_COLOR[activity.category] || CATEGORY_COLOR.transport;
+  const hasMeta = activity.fetchedAt || activity.source || activity.cost?.estimateNote;
   return (
     <motion.div
       initial={{ opacity: 0, x: -8 }}
@@ -44,7 +47,41 @@ function ActivityRow({ activity, currency }) {
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-bold text-slate-900 dark:text-white">{activity.title}</p>
           <DataStatusBadge status={activity.dataStatus} />
+          {hasMeta && (
+            <button
+              onClick={() => setShowMeta(!showMeta)}
+              className="inline-flex items-center gap-0.5 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 transition-colors hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+              title={t('Data source info')}
+            >
+              <Database className="h-2.5 w-2.5" />
+              {showMeta ? <ChevronUp className="h-2.5 w-2.5" /> : <ChevronDown className="h-2.5 w-2.5" />}
+            </button>
+          )}
         </div>
+
+        {/* Data source metadata panel (toggle) */}
+        {showMeta && hasMeta && (
+          <div className="mt-1.5 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2 dark:border-slate-700 dark:bg-slate-800/40">
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">
+              {activity.source && (
+                <span className="inline-flex items-center gap-1">
+                  <Database className="h-3 w-3" /> {t('Source')}: <b>{activity.source}</b>
+                </span>
+              )}
+              {activity.fetchedAt && (
+                <span className="inline-flex items-center gap-1">
+                  <RefreshCw className="h-3 w-3" /> {t('Fetched')}: {new Date(activity.fetchedAt).toLocaleString()}
+                </span>
+              )}
+              {activity.cost?.estimateNote && (
+                <span className="inline-flex items-center gap-1">
+                  💰 {activity.cost.estimateNote}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {activity.description && (
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{activity.description}</p>
         )}

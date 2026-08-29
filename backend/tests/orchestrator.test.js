@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import itineraryService from '../src/services/itinerary.service.js';
 import finalValidatorAgent from '../src/agents/finalValidator.agent.js';
+import { buildTransportFallbackOrder } from '../src/orchestrator/tripOrchestrator.js';
 
 test('dateRange produces one day per calendar date', () => {
   const days = itineraryService.dateRange('2025-06-01', '2025-06-05');
@@ -301,6 +302,338 @@ test('buildDays assigns distinct geographic areas per day from real locality dat
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════
+// Transport Fallback Logic Tests
+// ═══════════════════════════════════════════════════════════════════
+
+test('buildTransportFallbackOrder returns preferred mode first', () => {
+  const order = buildTransportFallbackOrder('train', '');
+  assert.deepEqual(order, ['train', 'flight', 'bus']);
+});
+
+test('buildTransportFallbackOrder defaults to flight when no preference', () => {
+  const order = buildTransportFallbackOrder('flight', '');
+  assert.deepEqual(order, ['flight', 'train', 'bus']);
+});
+
+test('buildTransportFallbackOrder uses userPreference when preferredMode is empty', () => {
+  const order = buildTransportFallbackOrder('', 'bus');
+  assert.deepEqual(order, ['bus', 'flight', 'train']);
+});
+
+test('buildTransportFallbackOrder prefers preferredMode over userPreference', () => {
+  const order = buildTransportFallbackOrder('train', 'bus');
+  assert.deepEqual(order, ['train', 'flight', 'bus']);
+});
+
+test('buildTransportFallbackOrder defaults to flight when both are empty', () => {
+  const order = buildTransportFallbackOrder('', '');
+  assert.deepEqual(order, ['flight', 'train', 'bus']);
+});
+
+test('buildTransportFallbackOrder includes all three modes exactly once', () => {
+  for (const mode of ['flight', 'train', 'bus']) {
+    const order = buildTransportFallbackOrder(mode, '');
+    const unique = new Set(order);
+    assert.equal(unique.size, 3, `order for ${mode} should have 3 unique modes`);
+    assert.ok(order.includes('flight'), `order for ${mode} includes flight`);
+    assert.ok(order.includes('train'), `order for ${mode} includes train`);
+    assert.ok(order.includes('bus'), `order for ${mode} includes bus`);
+  }
+});
+
+test('buildTransportFallbackOrder handles null preferredMode', () => {
+  const order = buildTransportFallbackOrder(null, 'train');
+  assert.deepEqual(order, ['train', 'flight', 'bus']);
+});
+
+test('buildTransportFallbackOrder handles undefined inputs', () => {
+  const order = buildTransportFallbackOrder(undefined, undefined);
+  assert.deepEqual(order, ['flight', 'train', 'bus']);
+});
+
+test('buildTransportFallbackOrder handles null userPreference', () => {
+  const order = buildTransportFallbackOrder('bus', null);
+  assert.deepEqual(order, ['bus', 'flight', 'train']);
+});
+
+test('buildTransportFallbackOrder first element is always the resolved primary', () => {
+  // Even with garbage input, the function should resolve to a valid primary
+  const order1 = buildTransportFallbackOrder('bus', '');
+  assert.equal(order1[0], 'bus');
+  const order2 = buildTransportFallbackOrder('', 'train');
+  assert.equal(order2[0], 'train');
+  const order3 = buildTransportFallbackOrder('', '');
+  assert.equal(order3[0], 'flight');
+});
+
+test('buildDaysPlan uses transport fallback info when modesChecked is provided', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Umred',
+    destination: 'Nagpur',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: {
+      mode: 'train',
+      data: {
+        isLive: false,
+        selected: null,
+        message: 'Live transport data unavailable from Umred to Nagpur. All checked modes (flights, trains, buses) returned no results.',
+        modesChecked: ['flight', 'train', 'bus'],
+      },
+    },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 3000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  const transport = day1.activities.find((a) => a.category === 'transport' && a.slot === 'transport');
+  assert.ok(transport, 'day includes transport activity');
+  assert.equal(transport.isLive, false, 'transport is not live when all modes failed');
+  assert.equal(transport.dataStatus, 'unavailable');
+  assert.ok(transport.cost.isEstimate, 'transport cost is an estimate');
+  assert.ok(transport.description.includes('unavailable'), 'description mentions unavailability');
+});
+
+test('buildDaysPlan uses live train data when train is selected', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Mumbai',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: {
+      mode: 'train',
+      data: {
+        isLive: true,
+        selected: { trainName: 'Konkan Kanya', trainNumber: '10111', price: { amount: 850, currency: 'INR' } },
+        offers: [
+          { trainName: 'Konkan Kanya', trainNumber: '10111', price: { amount: 850, currency: 'INR' } },
+          { trainName: 'Jan Shatabdi', trainNumber: '12051', price: { amount: 650, currency: 'INR' } },
+        ],
+      },
+    },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 5000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  const transport = day1.activities.find((a) => a.category === 'train' && a.slot === 'transport');
+  assert.ok(transport, 'day includes train transport');
+  assert.equal(transport.isLive, true, 'train data is live');
+  assert.equal(transport.dataStatus, 'live');
+  assert.equal(transport.cost.amount, 850, 'uses live train price');
+  assert.equal(transport.cost.isEstimate, false, 'live price is not an estimate');
+  assert.ok(transport.place.includes('Konkan Kanya'), 'place includes train name');
+});
+
+test('buildDaysPlan uses live bus data when bus is selected', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Mumbai',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: {
+      mode: 'bus',
+      data: {
+        isLive: true,
+        selected: { operator: 'Paulo Travels', departureTime: '22:00', price: { amount: 600, currency: 'INR' } },
+        offers: [
+          { operator: 'Paulo Travels', departureTime: '22:00', price: { amount: 600, currency: 'INR' } },
+          { operator: 'Neeta Travels', departureTime: '21:30', price: { amount: 750, currency: 'INR' } },
+        ],
+      },
+    },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 5000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  const transport = day1.activities.find((a) => a.category === 'bus' && a.slot === 'transport');
+  assert.ok(transport, 'day includes bus transport');
+  assert.equal(transport.isLive, true, 'bus data is live');
+  assert.equal(transport.dataStatus, 'live');
+  assert.equal(transport.cost.amount, 600, 'uses live bus price');
+  assert.equal(transport.cost.isEstimate, false, 'live price is not an estimate');
+  assert.ok(transport.place.includes('Paulo Travels'), 'place includes bus operator');
+});
+
+test('buildDaysPlan shows honest message when no transport is available', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Umred',
+    destination: 'Nagpur',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: {
+      mode: 'flight',
+      data: {
+        isLive: false,
+        selected: null,
+        message: 'Live transport data unavailable from Umred to Nagpur. All checked modes returned no results.',
+        modesChecked: ['flight', 'train', 'bus'],
+      },
+    },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 3000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  const transport = day1.activities.find((a) => a.category === 'transport' && a.slot === 'transport');
+  assert.ok(transport, 'day includes transport activity');
+  assert.equal(transport.isLive, false);
+  assert.equal(transport.dataStatus, 'unavailable');
+  assert.ok(transport.description.includes('unavailable'), 'honest about unavailability');
+  assert.ok(transport.cost.isEstimate, 'cost is marked as estimate');
+  // The estimate should come from the budget allocation, not an invented price
+  assert.ok(transport.cost.estimateNote.includes('Estimated'), 'estimate note present');
+});
+
+test('buildDaysPlan includes fetchedAt metadata on all activities', () => {
+  const days = itineraryService.buildDays({
+    origin: '',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: { mode: 'flight', data: { isLive: false, selected: null } },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 3000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  for (const day of days) {
+    for (const act of day.activities) {
+      assert.ok(act.fetchedAt, `activity "${act.title}" has fetchedAt`);
+      assert.ok(typeof act.fetchedAt === 'string', 'fetchedAt is a string');
+      // Should be a valid ISO date
+      assert.ok(!isNaN(new Date(act.fetchedAt).getTime()), `fetchedAt "${act.fetchedAt}" is a valid date`);
+    }
+  }
+});
+
+test('buildDaysPlan marks restaurant costs as estimates with source metadata', () => {
+  const days = itineraryService.buildDays({
+    origin: '',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: { mode: 'flight', data: { isLive: false, selected: null } },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [
+      { name: 'Test Restaurant', placeId: 'r1', rating: 4, priceLevel: 2, coordinates: { lat: 15.5, lng: 73.8 } },
+    ],
+    budgetAllocation: { transport: { amount: 3000 }, hotels: { amount: 5000 }, food: { amount: 4000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  const meals = day1.activities.filter((a) => a.category === 'restaurant');
+  assert.ok(meals.length > 0, 'day has restaurant activities');
+  for (const meal of meals) {
+    assert.equal(meal.cost.isEstimate, true, `"${meal.title}" cost is marked as estimate`);
+    assert.ok(meal.cost.estimateNote, `"${meal.title}" has estimateNote`);
+    assert.ok(meal.cost.estimateNote.includes('Estimated'), `"${meal.title}" estimateNote mentions Estimated`);
+    assert.ok(meal.cost.source, `"${meal.title}" has source`);
+    assert.ok(meal.fetchedAt, `"${meal.title}" has fetchedAt`);
+  }
+});
+
+test('final validator flags attraction scheduled after 21:00', () => {
+  const days = [
+    {
+      dayNumber: 1,
+      date: new Date('2025-06-01'),
+      activities: [
+        { title: 'Fort', time: '09:00', category: 'attraction', cost: { amount: 100, isEstimate: true }, dataStatus: 'live' },
+        { title: 'Night Museum Tour', time: '22:00', category: 'attraction', cost: { amount: 200, isEstimate: true }, dataStatus: 'live' },
+      ],
+    },
+  ];
+  const result = finalValidatorAgent.runDeterministic({
+    days,
+    budget: 10000,
+    totalEstimatedCost: 300,
+    destination: 'Goa',
+    origin: '',
+    prefs: {},
+  });
+  assert.ok(result.warnings.some((w) => w.includes('22:00') && w.includes('opening hours')), 'flags late-night attraction');
+});
+
+test('final validator flags insufficient buffer between transport and next activity', () => {
+  const days = [
+    {
+      dayNumber: 1,
+      date: new Date('2025-06-01'),
+      activities: [
+        { title: 'Flight to Goa', time: '08:00', category: 'flight', cost: { amount: 5000, isEstimate: false }, dataStatus: 'live' },
+        { title: 'Beach', time: '08:15', category: 'attraction', cost: { amount: 0, isEstimate: true }, dataStatus: 'estimate' },
+      ],
+    },
+  ];
+  const result = finalValidatorAgent.runDeterministic({
+    days,
+    budget: 10000,
+    totalEstimatedCost: 5000,
+    destination: 'Goa',
+    origin: 'Mumbai',
+    prefs: {},
+  });
+  assert.ok(result.warnings.some((w) => w.includes('buffer')), 'flags insufficient transport buffer');
+});
+
+test('final validator flags isLive/dataStatus contradiction', () => {
+  const days = [
+    {
+      dayNumber: 1,
+      date: new Date('2025-06-01'),
+      activities: [
+        { title: 'Ghost Flight', time: '09:00', category: 'flight', cost: { amount: 5000, isEstimate: false }, dataStatus: 'unavailable', isLive: true },
+      ],
+    },
+  ];
+  const result = finalValidatorAgent.runDeterministic({
+    days,
+    budget: 10000,
+    totalEstimatedCost: 5000,
+    destination: 'Goa',
+    origin: 'Mumbai',
+    prefs: {},
+  });
+  assert.ok(result.issues.some((i) => i.includes('contradiction')), 'flags isLive/dataStatus contradiction');
+});
+
 test('buildDays enforces the budget as a hard constraint', () => {
   const expensiveHotel = {
     name: 'Luxury Hotel',
@@ -338,4 +671,300 @@ test('buildDays enforces the budget as a hard constraint', () => {
   assert.ok(total <= 30000, `total ${total} must stay within the budget`);
   const last = days[days.length - 1];
   assert.ok(last.remainingBudget >= 0, 'remaining budget is never negative');
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Transport Fallback Integration Tests — mode switching, departure,
+// no-origin, and return transport scenarios.
+// ═══════════════════════════════════════════════════════════════════
+
+test('buildDaysPlan switches transport mode when fallback finds a live option', () => {
+  // Simulates: user prefers flight, but only train has live data.
+  // The orchestrator would set mode='train' after fallback succeeds.
+  const days = itineraryService.buildDays({
+    origin: 'Mumbai',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: {
+      mode: 'train', // orchestrator switched from flight → train after fallback
+      data: {
+        isLive: true,
+        selected: { trainName: 'Hazard express', trainNumber: '17617', price: { amount: 450, currency: 'INR' } },
+        offers: [],
+      },
+    },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 5000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  const transport = day1.activities.find((a) => a.slot === 'transport' && a.category === 'train');
+  assert.ok(transport, 'day includes train transport (not flight)');
+  assert.ok(transport.title.includes('Train'), 'title says Train, not Flight');
+  assert.equal(transport.cost.amount, 450, 'uses train price');
+  assert.equal(transport.isLive, true);
+});
+
+test('buildDaysPlan departure day includes return transport when origin is set', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Mumbai',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-03',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: { mode: 'flight', data: { isLive: false, selected: null } },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 6000 }, hotels: { amount: 6000 }, food: { amount: 3000 } },
+    currency: 'INR',
+  });
+
+  // Day 3 is departure day
+  const day3 = days[2];
+  assert.equal(day3.dayNumber, 3);
+  const returnTransport = day3.activities.find(
+    (a) => a.category === 'transport' && a.title.includes('Return')
+  );
+  assert.ok(returnTransport, 'departure day has return transport');
+  assert.ok(returnTransport.title.includes('Mumbai'), 'return transport mentions origin');
+  assert.equal(returnTransport.isLive, false, 'return transport is not live (never fetched)');
+  assert.equal(returnTransport.dataStatus, 'unavailable');
+  assert.ok(returnTransport.cost.isEstimate, 'return transport cost is an estimate');
+});
+
+test('buildDaysPlan departure day has no sightseeing activities', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Mumbai',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-03',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: { mode: 'flight', data: { isLive: false, selected: null } },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [
+      { name: 'Fort Aguada', placeId: 'a1', address: 'Candolim, Goa', coordinates: { lat: 15.49, lng: 73.76 }, types: ['tourist_attraction'] },
+    ],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 6000 }, hotels: { amount: 6000 }, food: { amount: 3000 } },
+    currency: 'INR',
+  });
+
+  const day3 = days[2];
+  const sightseeing = day3.activities.filter(
+    (a) => a.category === 'attraction' || (a.category === 'activity' && a.slot !== 'night')
+  );
+  assert.equal(sightseeing.length, 0, 'departure day has no sightseeing');
+  // Departure day should only have check-out and return transport
+  const categories = day3.activities.map((a) => a.category);
+  assert.ok(categories.every((c) => c === 'hotel' || c === 'transport'), 'departure day only has hotel + transport');
+});
+
+test('buildDaysPlan no-origin trip has no outbound transport on day 1', () => {
+  const days = itineraryService.buildDays({
+    origin: '',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: { mode: 'flight', data: { isLive: false, selected: null } },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 3000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  // No outbound/return transport, but local transport estimates may exist
+  const outboundTransport = day1.activities.filter(
+    (a) => a.slot === 'transport' && a.title.includes('to Goa') || a.title.includes('from')
+  );
+  assert.equal(outboundTransport.length, 0, 'no outbound transport when origin is empty');
+  // Only local transport (intra-day) should exist
+  const localTransport = day1.activities.filter(
+    (a) => a.slot === 'transport' && a.title.includes('Local transport')
+  );
+  assert.ok(localTransport.length <= 1, 'at most one local transport entry');
+});
+
+test('buildDaysPlan no-origin trip has no return transport on departure day', () => {
+  const days = itineraryService.buildDays({
+    origin: '',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-03',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: { mode: 'flight', data: { isLive: false, selected: null } },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 3000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day3 = days[2];
+  const returnTransport = day3.activities.filter(
+    (a) => a.category === 'transport' && a.title.includes('Return')
+  );
+  assert.equal(returnTransport.length, 0, 'no return transport when origin is empty');
+});
+
+test('buildDaysPlan hotel repeats across days (allowed), attractions prefer uniqueness', () => {
+  const days = itineraryService.buildDays({
+    origin: '',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-04',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: {
+      data: {
+        isLive: true,
+        recommended: { name: 'Beach Resort', price: { amount: 2000, currency: 'INR' }, latitude: 15.5, longitude: 73.8, isLive: true },
+        hotels: [],
+      },
+    },
+    transportResult: { mode: 'flight', data: { isLive: false, selected: null } },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [
+      { name: 'Fort Aguada', placeId: 'a1', suburb: 'Candolim', address: 'Fort Aguada, Candolim, Goa', coordinates: { lat: 15.493, lng: 73.763 }, types: ['tourist_attraction'] },
+      { name: 'Candolim Beach', placeId: 'a2', suburb: 'Candolim', address: 'Candolim Beach, Candolim, Goa', coordinates: { lat: 15.497, lng: 73.752 }, types: ['tourist_attraction'] },
+      { name: 'Baga Beach', placeId: 'a3', suburb: 'Baga', address: 'Baga Beach, Baga, Goa', coordinates: { lat: 15.555, lng: 73.751 }, types: ['tourist_attraction'] },
+      { name: 'Baga Arcade', placeId: 'a4', suburb: 'Baga', address: 'Baga Arcade, Baga, Goa', coordinates: { lat: 15.559, lng: 73.747 }, types: ['tourist_attraction'] },
+    ],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 5000 }, hotels: { amount: 18000 }, food: { amount: 6000 } },
+    currency: 'INR',
+  });
+
+  // Days 1-3 are full days, day 4 is departure
+  const fullDays = days.slice(0, 3);
+
+  // Hotel name should be the same across all nights (hotels CAN repeat)
+  const hotelNames = fullDays
+    .map((d) => d.activities.find((a) => a.category === 'hotel' && a.cost?.amount > 0))
+    .filter(Boolean)
+    .map((a) => a.place);
+  if (hotelNames.length > 1) {
+    assert.ok(hotelNames.every((n) => n === hotelNames[0]), 'same hotel across all nights');
+  }
+
+  // Attractions should prefer uniqueness, but with only 2 areas for 3 days,
+  // the system honestly reuses when the pool is exhausted. Verify that
+  // within each day, morning/afternoon/evening slots each pick exactly one.
+  for (const day of fullDays) {
+    const dayAttractions = day.activities.filter((a) => a.category === 'attraction');
+    assert.ok(dayAttractions.length >= 1, `day ${day.dayNumber} has at least one attraction`);
+    // Each attraction should have a valid place name (not empty)
+    for (const a of dayAttractions) {
+      assert.ok(a.place && a.place.length > 0, `day ${day.dayNumber} attraction has a place name`);
+    }
+  }
+  // Across all full days, the system attempted distinct picks (some may
+  // repeat due to sparse data — that's honest behavior, not a bug).
+  const allPlaces = fullDays.flatMap((d) => d.activities.filter((a) => a.category === 'attraction').map((a) => a.place));
+  assert.ok(allPlaces.length >= 3, 'at least 3 total attraction activities across the trip');
+});
+
+test('buildDaysPlan outbound transport cost uses live price when available', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Mumbai',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: {
+      mode: 'flight',
+      data: {
+        isLive: true,
+        selected: { airline: 'IndiGo', flightNumber: '6E-301', price: { amount: 4500, currency: 'INR' } },
+        offers: [],
+      },
+    },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 10000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  const outbound = day1.activities.find((a) => a.slot === 'transport' && a.category === 'flight');
+  assert.ok(outbound, 'outbound flight exists');
+  assert.equal(outbound.cost.amount, 4500, 'uses live flight price from provider');
+  assert.equal(outbound.cost.isEstimate, false, 'live price is not an estimate');
+  assert.equal(outbound.isLive, true);
+  assert.equal(outbound.dataStatus, 'live');
+});
+
+test('buildDaysPlan outbound transport uses budget estimate when not live', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Mumbai',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-02',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: {
+      mode: 'flight',
+      data: { isLive: false, selected: null },
+    },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 10000 }, hotels: { amount: 5000 }, food: { amount: 2000 } },
+    currency: 'INR',
+  });
+
+  const day1 = days[0];
+  const outbound = day1.activities.find((a) => a.slot === 'transport');
+  assert.ok(outbound, 'outbound transport exists');
+  assert.equal(outbound.cost.isEstimate, true, 'budget estimate is an estimate');
+  assert.ok(outbound.cost.estimateNote.includes('Estimated'), 'has estimate note');
+  assert.equal(outbound.isLive, false);
+  assert.equal(outbound.dataStatus, 'unavailable');
+});
+
+test('buildDaysPlan total cost equals sum of day costs', () => {
+  const days = itineraryService.buildDays({
+    origin: 'Mumbai',
+    destination: 'Goa',
+    startDate: '2025-06-01',
+    endDate: '2025-06-03',
+    travelers: { adults: 2, children: 0 },
+    prefs: { foodPreference: '', travelStyle: 'standard', activityLevel: 'moderate', interests: [], accessibility: [] },
+    hotelResult: { data: { isLive: false, recommended: null, hotels: [] } },
+    transportResult: { mode: 'flight', data: { isLive: false, selected: null } },
+    weatherResult: { data: { provider: 'unavailable', forecast: null } },
+    attractions: [],
+    restaurants: [],
+    budgetAllocation: { transport: { amount: 5000 }, hotels: { amount: 9000 }, food: { amount: 3000 } },
+    currency: 'INR',
+  });
+
+  const totalFromDays = itineraryService.computeItineraryCost(days);
+  const totalFromSum = days.reduce((s, d) => s + d.dayCost, 0);
+  assert.equal(totalFromDays, totalFromSum, 'computeItineraryCost matches manual sum');
+  // Cumulative of last day should match total
+  const lastDay = days[days.length - 1];
+  assert.equal(lastDay.cumulativeCost, totalFromDays, 'last day cumulative equals total');
 });

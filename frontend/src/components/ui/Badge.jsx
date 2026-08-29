@@ -29,3 +29,31 @@ export function ProviderStatusBadge({ configured }) {
   const { t } = useI18n();
   return configured ? <Badge tone="green">● {t('Configured')}</Badge> : <Badge tone="rose">{t('Not configured')}</Badge>;
 }
+
+/**
+ * Data-source transparency pill: shows whether data is from a live API,
+ * an estimate, or unavailable. Includes source name and timestamp.
+ */
+export function DataSourceBadge({ source, isEstimate, fetchedAt }) {
+  const { t } = useI18n();
+  if (isEstimate) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-amber-500">
+        ≈ {t('Estimate')}{source ? ` · ${source}` : ''}
+      </span>
+    );
+  }
+  if (source && source !== 'none' && source !== 'unavailable') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-emerald-500">
+        ● {t('Live data')}{source ? ` · ${source}` : ''}
+        {fetchedAt && <span className="text-slate-400">({new Date(fetchedAt).toLocaleTimeString()})</span>}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] text-rose-400">
+      ✕ {t('Data unavailable')}
+    </span>
+  );
+}

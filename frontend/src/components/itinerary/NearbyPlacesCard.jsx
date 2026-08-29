@@ -92,15 +92,32 @@ function PlaceCard({ item, variant, currency }) {
         )}
 
         {showPrice && (
-          <p className="mt-auto pt-1 text-sm font-extrabold text-slate-900 dark:text-white">
-            {variant === 'hotel' ? (
-              <>{formatCurrency(item.pricePerNight, currency)} <span className="text-xs font-medium text-slate-400">{t('/night')}</span></>
-            ) : variant === 'restaurant' ? (
-              <>{formatCurrency(item.averageCost, currency)} <span className="text-xs font-medium text-slate-400">{t('avg meal')}</span></>
-            ) : (
-              <>{formatCurrency(item.entryFee.amount, currency)} <span className="text-xs font-medium text-slate-400">{t('entry')}</span></>
+          <div className="mt-auto pt-1">
+            <p className="text-sm font-extrabold text-slate-900 dark:text-white">
+              {variant === 'hotel' ? (
+                <>{formatCurrency(item.pricePerNight, currency)} <span className="text-xs font-medium text-slate-400">{t('/night')}</span></>
+              ) : variant === 'restaurant' ? (
+                <>{formatCurrency(item.averageCost, currency)} <span className="text-xs font-medium text-slate-400">{t('avg meal')}</span></>
+              ) : (
+                <>{formatCurrency(item.entryFee.amount, currency)} <span className="text-xs font-medium text-slate-400">{t('entry')}</span></>
+              )}
+            </p>
+            {/* Estimate indicator for restaurant/attraction costs */}
+            {variant === 'restaurant' && item.averageCostIsEstimate && (
+              <p className="mt-0.5 text-[10px] text-amber-500">≈ {t('estimate')} · {item.averageCostNote || t('Actual prices not available')}</p>
             )}
-          </p>
+            {variant === 'attraction' && item.entryFeeIsEstimate && (
+              <p className="mt-0.5 text-[10px] text-amber-500">≈ {t('estimate')} · {item.entryFeeNote || t('Confirm entry fee locally')}</p>
+            )}
+            {/* Live badge for hotels */}
+            {variant === 'hotel' && item.isLive && (
+              <p className="mt-0.5 text-[10px] text-emerald-500">● {t('Live price from provider')}</p>
+            )}
+            {/* Fetched at timestamp */}
+            {item.fetchedAt && (
+              <p className="mt-0.5 text-[9px] text-slate-400">{t('Fetched')}: {new Date(item.fetchedAt).toLocaleString()}</p>
+            )}
+          </div>
         )}
         {item.address && <p className="text-[11px] text-slate-400">{item.address}</p>}
       </div>

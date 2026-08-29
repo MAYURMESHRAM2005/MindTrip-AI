@@ -61,6 +61,10 @@ export default function ItineraryPage() {
   const remaining = trip.budget.total - estimated;
   const usedPct = trip.budget.total > 0 ? Math.min(100, Math.round((estimated / trip.budget.total) * 1000) / 10) : 0;
 
+  // Transport data availability from the new fallback fields
+  const transportModesChecked = itinerary.transport?.modesChecked || [];
+  const transportFallbackMsg = itinerary.transport?.message || '';
+
   return (
     <div>
       <PageHeader
@@ -81,7 +85,7 @@ export default function ItineraryPage() {
       />
 
       {/* Summary strip */}
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <div className="card p-4">
           <p className="text-xs font-semibold uppercase text-slate-400">{t('Total budget')}</p>
           <p className="mt-1 text-lg font-extrabold text-slate-900 dark:text-white">{formatCurrency(trip.budget.total, currency)}</p>
@@ -109,6 +113,23 @@ export default function ItineraryPage() {
               ? `${t('Emergency reserve')} ${formatCurrency(itinerary.budgetAllocation.emergencyReserve.amount, currency)} ${t('kept untouched')}`
               : ''}
           </p>
+        </div>
+        <div className="card p-4">
+          <p className="text-xs font-semibold uppercase text-slate-400">{t('Transport')}</p>
+          <div className="mt-1.5">
+            {itinerary.transport?.isLive ? (
+              <Badge tone="green">● {t('Live')} {itinerary.transport.mode}</Badge>
+            ) : transportModesChecked.length > 0 ? (
+              <div>
+                <Badge tone="amber">{t('Fallback checked')}: {transportModesChecked.join(', ')}</Badge>
+                {transportFallbackMsg && (
+                  <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400 line-clamp-2">{transportFallbackMsg}</p>
+                )}
+              </div>
+            ) : (
+              <Badge tone="slate">{itinerary.transport?.mode || t('Not set')}</Badge>
+            )}
+          </div>
         </div>
         <div className="card p-4">
           <p className="text-xs font-semibold uppercase text-slate-400">{t('Validation')}</p>

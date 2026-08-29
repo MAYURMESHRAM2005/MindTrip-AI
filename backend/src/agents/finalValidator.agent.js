@@ -139,6 +139,50 @@ class FinalValidatorAgent {
     const estimates = days?.flatMap((d) => d.activities).filter((a) => a.cost?.isEstimate === true) || [];
     if (estimates.length) warnings.push(`${estimates.length} costs are estimates (flagged)`);
 
+    // 8. Closing hours validation — if an attraction is scheduled after 21:00,
+    //    flag it since most tourist attractions close by 18:00-20:00.
+    for (const day of days || []) {
+      for (const act of day.activities || []) {
+        if ((act.category === 'attraction' || act.category === 'activity') && act.time) {
+          const actMinutes = this._timeToMinutes(act.time);
+          if (actMinutes !== null && actMinutes >= 21 * 60) {
+            warnings.push(`Day ${day.dayNumber}: "${act.title}" scheduled at ${act.time} — most attractions close by 20:00. Verify opening hours.`);
+          }
+        }
+      }
+    }
+
+    // 9. Transport timing validation — ensure transport activities have
+    //    sufficient buffer before the next activity.
+    for (const day of days || []) {
+      const activities = day.activities || [];
+      for (let i = 0; i < activities.length; i++) {
+        const act = activities[i];
+        if (['flight', 'train', 'bus', 'transport'].includes(act.category)) {
+          const transportEnd = this._timeToMinutes(act.time);
+          if (transportEnd !== null && i + 1 < activities.length) {
+            const nextAct = activities[i + 1];
+            const nextStart = this._timeToMinutes(nextAct.time);
+            if (nextStart !== null && nextStart - transportEnd < 30) {
+              warnings.push(`Day ${day.dayNumber}: Transport at ${act.time} may not allow enough buffer before "${nextAct.title}" at ${nextAct.time}`);
+            }
+          }
+        }
+      }
+    }
+
+    // 10. Data integrity — verify no activity claims live data when source is unavailable
+    for (const day of days || []) {
+      for (const act of day.activities || []) {
+        if (act.isLive === true && act.dataStatus === 'unavailable') {
+          issues.push(`Day ${day.dayNumber}: "${act.title}" is marked isLive=true but dataStatus=unavailable — contradiction`);
+        }
+        if (act.cost?.isEstimate === false && act.source !== 'provider' && act.source !== 'geoapify' && act.source !== 'amadeus-hotels') {
+          warnings.push(`Day ${day.dayNumber}: "${act.title}" claims non-estimate cost but source is "${act.source}" — verify`);
+        }
+      }
+    }
+
     const passed = issues.length === 0;
 
     return {

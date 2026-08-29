@@ -13,6 +13,9 @@ const itinerarySchema = new mongoose.Schema(
       mode: { type: String, default: 'not-set' },
       details: { type: mongoose.Schema.Types.Mixed, default: null },
       isLive: { type: Boolean, default: false },
+      alternatives: { type: [mongoose.Schema.Types.Mixed], default: [] },
+      modesChecked: { type: [String], default: [] },
+      message: { type: String, default: '' },
     },
     accommodation: {
       name: { type: String, default: '' },

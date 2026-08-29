@@ -21,6 +21,7 @@ import itineraryService from '../services/itinerary.service.js';
 import { generateItinerary, getRequestCount } from '../services/itineraryGenerator.service.js';
 import placesProvider from '../providers/places.provider.js';
 import mapsProvider from '../providers/maps.provider.js';
+import transportIntel from '../services/transportIntelligence.service.js';
 import { notifyTripPlanned, notifyBudgetOptimized } from '../services/notification.service.js';
 
 function fmtDate(d) {
@@ -31,6 +32,23 @@ function fmtDate(d) {
 function inferTransportMode({ origin, destination, transportPreference }) {
   if (transportPreference) return transportPreference;
   return 'flight';
+}
+
+/**
+ * Build an ordered list of transport modes to try for a given route.
+ * The preferred mode is tried first, then alternatives cascade through
+ * train → bus → flight (or similar). This ensures we never fabricate
+ * a transport option that doesn't actually exist.
+ */
+export function buildTransportFallbackOrder(preferredMode, userPreference) {
+  const allModes = ['flight', 'train', 'bus'];
+  const primary = preferredMode || userPreference || 'flight';
+  // Ensure primary is valid
+  const ordered = [primary];
+  for (const m of allModes) {
+    if (!ordered.includes(m)) ordered.push(m);
+  }
+  return ordered;
 }
 
 /**
@@ -184,34 +202,109 @@ export async function generateTrip({ user, request }) {
     usedAI: false,
   });
 
-  logger.info('[ORCHESTRATOR] ═══ BATCH 3: Transport agent ═══');
+  logger.info('[ORCHESTRATOR] ═══ BATCH 3: Transport Intelligence Engine ═══');
   const transportMode = inferTransportMode({ origin: request.origin, destination, transportPreference: prefs.transportPreference });
   logger.info(`[ORCHESTRATOR] Transport mode: ${transportMode}, origin: ${request.origin || 'none'}`);
   const transportResult = { mode: transportMode, data: { isLive: false, selected: null } };
 
-  if (transportMode === 'flight' && request.origin) {
-    const f = await flightAgent.run({ origin: request.origin, destination, departDate: fmtDate(request.startDate), returnDate: fmtDate(request.endDate), adults: request.adults, travelClass: 'ECONOMY', userId });
-    report.push(flightAgent.report(f));
-    if (f.data?.isLive) {
-      transportResult.mode = 'flight';
-      transportResult.data = { isLive: true, selected: f.data.selectedFlight || f.data.flights?.[0] || null, offers: f.data.flights };
-    } else {
-      transportResult.data = { isLive: false, selected: null, message: f.data?.message || '' };
+  // ── Transport Intelligence Engine ────────────────────────────────────
+  // Uses the Transport Intelligence service to:
+  //  1. Geocode origin + destination
+  //  2. Find nearby airports, railway stations, bus terminals
+  //  3. Check real availability for each mode (parallel)
+  //  4. Build multi-modal journeys (ground transfer + main transport)
+  //  5. Rank all options by preference, time, cost, convenience
+  // ─────────────────────────────────────────────────────────────────────
+  let transportIntelResult = null;
+  if (request.origin) {
+    try {
+      transportIntelResult = await transportIntel.findTransportOptions({
+        origin: request.origin,
+        destination,
+        departDate: fmtDate(request.startDate),
+        returnDate: fmtDate(request.endDate),
+        adults: request.adults,
+        children: request.children,
+        preference: prefs.transportPreference || transportMode,
+        budget: allocation.transport?.amount || 0,
+        currency,
+      });
+      logger.info(`[ORCHESTRATOR] Transport Intelligence: ${transportIntelResult.options?.length || 0} options found, recommended: ${transportIntelResult.recommended?.name || 'none'}`);
+
+      // Use the recommended option for the main transport result
+      if (transportIntelResult.recommended) {
+        const rec = transportIntelResult.recommended;
+        transportResult.mode = rec.mode || transportMode;
+        transportResult.data = {
+          isLive: rec.isLive === true,
+          selected: {
+            // Normalize to the shape the rest of the system expects
+            airline: rec.mainTransport?.airline || '',
+            flightNumber: rec.mainTransport?.flightNumber || '',
+            trainName: rec.mainTransport?.trainName || '',
+            trainNumber: rec.mainTransport?.trainNumber || '',
+            operator: rec.mainTransport?.operator || '',
+            departAt: rec.mainTransport?.departure || '',
+            arriveAt: rec.mainTransport?.arrival || '',
+            departure: rec.mainTransport?.departure || '',
+            arrival: rec.mainTransport?.arrival || '',
+            duration: rec.mainTransport?.duration || rec.totalDuration || '',
+            price: rec.mainTransport?.price || (rec.totalCost ? { amount: rec.totalCost, currency } : null),
+            provider: rec.mainTransport?.provider || rec.source || 'transport-intelligence',
+            stops: rec.mainTransport?.stops,
+            status: rec.mainTransport?.status || 'scheduled',
+          },
+          offers: transportIntelResult.options.map((o) => ({
+            name: o.name,
+            mode: o.mode,
+            type: o.type,
+            price: o.mainTransport?.price || (o.totalCost ? { amount: o.totalCost, currency } : null),
+            duration: o.totalDuration,
+            isLive: o.isLive,
+            groundTransfer: o.groundTransfer,
+            recommendation: o.recommendation,
+          })),
+          // Multi-modal journey details
+          groundTransfer: rec.groundTransfer || null,
+          destinationTransfer: rec.destinationTransfer || null,
+          totalDuration: rec.totalDuration || '',
+          totalCost: rec.totalCost || null,
+          recommendation: rec.recommendation || '',
+          // Origin/destination geo for display
+          originGeo: transportIntelResult.originGeo || null,
+          destGeo: transportIntelResult.destGeo || null,
+        };
+        report.push({
+          agent: 'transport-intelligence',
+          status: 'success',
+          message: `Found ${transportIntelResult.options.length} transport option(s). Recommended: ${rec.name} (${rec.mode})`,
+          latencyMs: transportIntelResult.summary?.latencyMs || 0,
+          usedAI: false,
+        });
+      } else {
+        // No options found at all
+        transportResult.data = {
+          isLive: false,
+          selected: null,
+          message: transportIntelResult.summary?.message || `No transport options found from ${request.origin} to ${destination}`,
+          modesChecked: transportIntelResult.summary?.modesChecked || [],
+        };
+        report.push({
+          agent: 'transport-intelligence',
+          status: 'degraded',
+          message: transportIntelResult.summary?.message || 'No transport options available',
+          usedAI: false,
+        });
+      }
+    } catch (err) {
+      logger.warn(`[ORCHESTRATOR] Transport Intelligence error: ${err.message}`);
+      // Fallback to legacy agent-based approach
+      transportResult.data = {
+        isLive: false,
+        selected: null,
+        message: `Transport intelligence unavailable: ${err.message}. Book via your preferred provider.`,
+      };
     }
-  } else if (transportMode === 'train') {
-    const t = await trainAgent.run({ from: request.origin, to: destination, date: fmtDate(request.startDate), passengers: request.adults + request.children, trainClass: '', userId });
-    report.push(trainAgent.report(t));
-    if (t.data?.isLive) transportResult.data = { isLive: true, selected: t.data.trains?.[0] || null, offers: t.data.trains };
-  } else if (transportMode === 'bus') {
-    const b = await busAgent.run({ from: request.origin, to: destination, date: fmtDate(request.startDate), passengers: request.adults + request.children, userId });
-    report.push(busAgent.report(b));
-    if (b.data?.isLive) transportResult.data = { isLive: true, selected: b.data.buses?.[0] || null, offers: b.data.buses };
-  } else if (request.origin) {
-    // Default: try flight, fall back to status
-    const f = await flightAgent.run({ origin: request.origin, destination, departDate: fmtDate(request.startDate), returnDate: fmtDate(request.endDate), adults: request.adults, travelClass: 'ECONOMY', userId });
-    report.push(flightAgent.report(f));
-    if (f.data?.isLive) transportResult.data = { isLive: true, selected: f.data.selectedFlight || f.data.flights?.[0] || null, offers: f.data.flights };
-    else transportResult.data = { isLive: false, selected: null, message: f.data?.message || 'Transport live data unavailable' };
   }
 
   logger.info('[ORCHESTRATOR] ═══ BATCH 4: Deterministic budget agent ═══');
@@ -314,17 +407,21 @@ export async function generateTrip({ user, request }) {
   }
 
   const geminiLatencyMs = Date.now() - geminiStarted;
-  console.log(`[orchestrator] Gemini call: ${geminiResult?.success ? 'SUCCESS' : 'FAILED'} in ${geminiLatencyMs}ms (request #${getRequestCount()})`);
+  const geminiSuccess = geminiResult?.success === true;
+  const geminiQuotaExhausted = geminiResult?.quotaExhausted === true;
+  console.log(`[orchestrator] Gemini call: ${geminiSuccess ? 'SUCCESS' : geminiQuotaExhausted ? 'QUOTA_EXHAUSTED' : 'FAILED'} in ${geminiLatencyMs}ms (request #${getRequestCount()})`);
 
-  logger.info(`[ORCHESTRATOR] Gemini result: ${geminiResult?.success ? 'SUCCESS' : 'FAILED'} in ${geminiLatencyMs}ms, days: ${geminiResult?.itinerary?.days?.length || 0}`);
+  logger.info(`[ORCHESTRATOR] Gemini result: ${geminiSuccess ? 'SUCCESS' : geminiQuotaExhausted ? 'QUOTA_EXHAUSTED' : 'FAILED'} in ${geminiLatencyMs}ms, days: ${geminiResult?.itinerary?.days?.length || 0}`);
   report.push({
     agent: 'itinerary-generator',
-    status: geminiResult?.success ? 'success' : 'degraded',
-    message: geminiResult?.success
+    status: geminiSuccess ? 'success' : 'degraded',
+    message: geminiSuccess
       ? `Itinerary generated in ${geminiResult.latencyMs}ms (request #${geminiResult.geminiRequestCount})`
-      : `Gemini failed: ${geminiResult?.error || 'unknown error'}`,
+      : geminiQuotaExhausted
+        ? `Gemini daily quota exhausted — using deterministic plan as fallback`
+        : `Gemini failed: ${geminiResult?.error || 'unknown error'} — using deterministic plan as fallback`,
     latencyMs: geminiLatencyMs,
-    usedAI: geminiResult?.success || false,
+    usedAI: geminiSuccess,
   });
 
   logger.info('[ORCHESTRATOR] ═══ BATCH 8: Budget optimization + enriched sections ═══');
@@ -381,10 +478,12 @@ export async function generateTrip({ user, request }) {
   });
 
   logger.info(`[ORCHESTRATOR] Trip saved: ${trip._id}`);
-  await Itinerary.create({
+  let itinerary;
+  try {
+  itinerary = await Itinerary.create({
     trip: trip._id,
     user: userId,
-    days,
+    days: days || [],
     summary: validation.data?.summary || `Planned trip to ${destination}`,
     currency,
     totalEstimatedCost,
@@ -392,6 +491,16 @@ export async function generateTrip({ user, request }) {
       mode: transportResult.mode,
       details: transportResult.data?.selected || null,
       isLive: transportResult.data?.isLive === true,
+      alternatives: transportResult.data?.offers || [],
+      modesChecked: transportResult.data?.modesChecked || [],
+      message: transportResult.data?.message || '',
+      groundTransfer: transportResult.data?.groundTransfer || null,
+      destinationTransfer: transportResult.data?.destinationTransfer || null,
+      totalDuration: transportResult.data?.totalDuration || '',
+      totalCost: transportResult.data?.totalCost || null,
+      recommendation: transportResult.data?.recommendation || '',
+      originGeo: transportResult.data?.originGeo || null,
+      destGeo: transportResult.data?.destGeo || null,
     },
     accommodation: hotelResult?.data?.recommended
       ? {
@@ -415,12 +524,62 @@ export async function generateTrip({ user, request }) {
     budgetAllocation: allocation,
     extras,
   });
+  } catch (itinErr) {
+    logger.warn(`[ORCHESTRATOR] Itinerary.create() failed: ${itinErr.message} — retrying with sanitized days`);
+    // Sanitize days: strip any fields that might cause validation errors
+    const safeDays = (days || []).map((d) => ({
+      dayNumber: d.dayNumber,
+      date: d.date,
+      area: String(d.area || ''),
+      activities: (d.activities || []).map((a) => ({
+        time: String(a.time || ''),
+        slot: String(a.slot || ''),
+        title: String(a.title || 'Activity'),
+        place: String(a.place || ''),
+        description: String(a.description || ''),
+        category: ['transport', 'flight', 'train', 'bus', 'hotel', 'restaurant', 'attraction', 'activity', 'nightlife', 'free', 'other'].includes(a.category) ? a.category : 'activity',
+        address: String(a.address || ''),
+        cost: { amount: Number(a.cost?.amount) || 0, currency: String(a.cost?.currency || 'INR'), isEstimate: Boolean(a.cost?.isEstimate ?? true) },
+        source: String(a.source || 'ai-generated'),
+        isLive: Boolean(a.isLive),
+        dataStatus: ['live', 'estimate', 'unavailable'].includes(a.dataStatus) ? a.dataStatus : 'estimate',
+        priority: Number(a.priority) || 1,
+      })),
+      dayCost: Number(d.dayCost) || 0,
+    }));
+    itinerary = await Itinerary.create({
+      trip: trip._id,
+      user: userId,
+      days: safeDays,
+      summary: validation.data?.summary || `Planned trip to ${destination}`,
+      currency,
+      totalEstimatedCost,
+      transport: {
+        mode: transportResult.mode,
+        details: transportResult.data?.selected || null,
+        isLive: transportResult.data?.isLive === true,
+        alternatives: transportResult.data?.offers || [],
+        modesChecked: transportResult.data?.modesChecked || [],
+        message: transportResult.data?.message || '',
+      },
+      accommodation: { name: '', isLive: false, source: 'unavailable' },
+      safetyNotes: '',
+      emergencyInfo: null,
+      agentReport: report,
+      validation: { passed: false, issues: ['Itinerary sanitized due to validation error'], warnings: [], validatedAt: new Date() },
+      optimizedBudget: optimized,
+      budgetAllocation: allocation,
+      extras,
+    });
+  }
 
   await notifyTripPlanned(userId, trip._id, trip.title);
   if (optimized) await notifyBudgetOptimized(userId, trip._id, optimized.saved);
   logger.info(`[ORCHESTRATOR] Notifications sent for trip: ${trip._id}`);
 
-  const itinerary = await Itinerary.findOne({ trip: trip._id });
+  if (!itinerary) {
+    itinerary = await Itinerary.findOne({ trip: trip._id });
+  }
   logger.info(`[ORCHESTRATOR] Itinerary retrieved: ${itinerary?._id}`);
   const budgetSummary = budgetService.budgetUtilization({
     total: totalBudget,
@@ -459,13 +618,20 @@ export async function generateTrip({ user, request }) {
     validation: validation.data,
     pipelineMs,
     geminiRequestCount: getRequestCount(),
+    geminiQuotaExhausted: geminiQuotaExhausted || false,
     dataAvailability: {
       weatherLive: weatherResult?.data?.provider === 'live',
-      flightsLive: transportResult.data?.isLive,
+      flightsLive: transportResult.data?.isLive && transportResult.mode === 'flight',
+      trainsLive: transportResult.data?.isLive && transportResult.mode === 'train',
+      busesLive: transportResult.data?.isLive && transportResult.mode === 'bus',
       hotelsLive: hotelResult?.data?.isLive,
       attractionsLive: attractionResult?.data?.isLive,
       restaurantsLive: restaurantResult?.data?.isLive,
       nightlifeLive: nightlifeData.length > 0,
+      transportModesChecked: transportIntelResult?.summary?.modesChecked || transportResult.data?.modesChecked || [],
+      transportAlternatives: transportIntelResult?.options?.length || 0,
+      originGeo: transportIntelResult?.originGeo || null,
+      destGeo: transportIntelResult?.destGeo || null,
     },
   };
 }

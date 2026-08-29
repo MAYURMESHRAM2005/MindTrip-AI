@@ -196,4 +196,25 @@ export function providerStatus() {
   };
 }
 
-export default { searchFlights, providerStatus };
+/**
+ * Search airports by name/city using AviationStack.
+ * Used by the Transport Intelligence service to find nearby airports.
+ */
+export async function searchAirports(query, { limit = 10 } = {}) {
+  if (!env.AVIATIONSTACK_API_KEY || !query) return [];
+  try {
+    const data = await aviationstackGet('/airports', { search: query, limit });
+    return (data?.data || []).filter((a) => a.iata_code).map((a) => ({
+      iata_code: a.iata_code,
+      airport_name: a.airport_name || '',
+      city_name: a.city_name || '',
+      country_name: a.country_name || '',
+      latitude: a.latitude != null ? Number(a.latitude) : null,
+      longitude: a.longitude != null ? Number(a.longitude) : null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export default { searchFlights, searchAirports, providerStatus };

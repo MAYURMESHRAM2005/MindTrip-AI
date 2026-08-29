@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const activitySchema = new mongoose.Schema(
   {
     time: { type: String, default: '' }, // "09:00"
+    slot: { type: String, default: '' }, // transport | hotel | breakfast | morning | lunch | afternoon | evening | dinner | night | free | other
     period: { type: String, default: 'day' }, // morning | lunch | afternoon | evening | night
     title: { type: String, required: true, trim: true },
     place: { type: String, default: '' },
@@ -11,7 +12,7 @@ const activitySchema = new mongoose.Schema(
       type: String,
       enum: [
         'transport', 'flight', 'train', 'bus', 'hotel', 'restaurant', 'attraction',
-        'activity', 'weather', 'safety', 'free', 'other',
+        'activity', 'nightlife', 'weather', 'safety', 'free', 'other',
       ],
       default: 'other',
     },
@@ -33,7 +34,8 @@ const activitySchema = new mongoose.Schema(
       perPerson: { type: Number },
       estimateNote: { type: String, default: '' },
     },
-    source: { type: String, default: 'ai-generated' }, // provider | ai-generated | user
+    source: { type: String, default: 'ai-generated' }, // provider | ai-generated | user | estimate | none
+    fetchedAt: { type: String, default: '' },
     bookingUrl: { type: String, default: '' },
     isLive: { type: Boolean, default: false },
     dataStatus: {
