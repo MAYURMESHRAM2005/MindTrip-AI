@@ -155,6 +155,66 @@ export function clusterAreas(attractions = [], destination = '') {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Duplicate validation                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Validate that no sightseeing attraction or restaurant repeats across days.
+ * Hotels are allowed to repeat (same hotel for multi-night stay).
+ * If duplicates are found, remove the duplicate from the later day and log
+ * a warning. This is a safety net — the pickDistinct logic should prevent
+ * this, but we validate anyway.
+ */
+function validateNoDuplicateAttractions(days) {
+  const seenAttractions = new Map(); // placeKey → dayNumber
+  const seenRestaurants = new Map(); // placeKey → dayNumber
+  let removedCount = 0;
+
+  for (const day of days || []) {
+    const toRemove = [];
+    for (let i = 0; i < (day.activities || []).length; i++) {
+      const act = day.activities[i];
+      const k = placeKey({ placeId: act.placeId, name: act.place, coordinates: act.coordinates });
+
+      // Skip hotel重复 — same hotel for multi-night stay is expected
+      if (act.category === 'hotel') continue;
+      // Skip generic/unavailable entries
+      if (act.dataStatus === 'unavailable' || act.source === 'none') continue;
+      // Skip transport entries
+      if (act.category === 'transport' || ['flight', 'train', 'bus'].includes(act.category)) continue;
+
+      if (act.category === 'attraction' || act.category === 'activity' || act.category === 'nightlife') {
+        if (seenAttractions.has(k)) {
+          // Duplicate attraction — remove from this day
+          toRemove.push(i);
+          removedCount++;
+        } else {
+          seenAttractions.set(k, day.dayNumber);
+        }
+      }
+
+      if (act.category === 'restaurant') {
+        if (seenRestaurants.has(k)) {
+          // Duplicate restaurant — remove from this day
+          toRemove.push(i);
+          removedCount++;
+        } else {
+          seenRestaurants.set(k, day.dayNumber);
+        }
+      }
+    }
+    // Remove duplicates in reverse order to preserve indices
+    for (let j = toRemove.length - 1; j >= 0; j--) {
+      day.activities.splice(toRemove[j], 1);
+    }
+  }
+
+  if (removedCount > 0) {
+    console.warn(`[itinerary] Duplicate validation: removed ${removedCount} duplicate attraction(s)/restaurant(s) across days`);
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  Cost math (deterministic, traveller-aware)                         */
 /* ------------------------------------------------------------------ */
 
@@ -251,13 +311,18 @@ function placeKey(p) {
 
 /**
  * Pick up to `n` distinct items from `pool` that haven't been used yet.
- * Returns { picks, notes } - when the pool is exhausted it reuses with an
- * explicit explanation instead of inventing alternatives.
+ * Returns { picks, notes } - when the pool is exhausted it returns fewer
+ * picks with an explanation instead of reusing items from other days.
+ *
+ * IMPORTANT: The fallback loop now ALSO checks usedKeys to prevent
+ * cross-day repetition. When all unique items are exhausted, we return
+ * fewer picks rather than silently repeating places from other days.
  */
 function pickDistinct(pool, usedKeys, n, label) {
   const picks = [];
   const notes = [];
   let fresh = 0;
+  // First pass: pick truly unused items
   for (const item of pool || []) {
     if (picks.length >= n) break;
     const k = placeKey(item);
@@ -267,16 +332,23 @@ function pickDistinct(pool, usedKeys, n, label) {
       fresh += 1;
     }
   }
+  // If we didn't get enough, try the full pool but STILL respect usedKeys
+  // to avoid repeating attractions from other days.
   const remaining = n - picks.length;
   if (remaining > 0) {
     for (const item of pool || []) {
       if (picks.length >= n) break;
       const k = placeKey(item);
-      if (picks.includes(item)) continue;
+      if (usedKeys.has(k) || picks.includes(item)) continue;
       picks.push(item);
       usedKeys.add(k);
     }
-    if (remaining > 0) notes.push(`Only ${fresh} distinct ${label} found in live data - reusing options.`);
+    const stillMissing = n - picks.length;
+    if (stillMissing > 0) {
+      notes.push(`Only ${fresh} distinct ${label} available — ${stillMissing} slot(s) unfilled to avoid repeats.`);
+    } else if (fresh < n) {
+      notes.push(`${label}: ${fresh} from current area, ${n - fresh} from nearby areas.`);
+    }
   }
   return { picks, notes };
 }
@@ -389,21 +461,34 @@ export function buildDaysPlan({
     // Day-specific pools: the day's own area first (keeps each day focused on
     // its geographic region), supplemented by nearby places only when the area
     // has too few real options, then the full list as a last resort.
+    // CRITICAL: Exclude already-used places from pools to prevent cross-day repeats.
     const near = (pool, maxKm) =>
       (pool || []).filter(
-        (p) => !areaCentroid || p.coordinates?.lat == null
-          || haversineKm(areaCentroid.lat, areaCentroid.lng, p.coordinates.lat, p.coordinates.lng) <= maxKm
+        (p) => (!areaCentroid || p.coordinates?.lat == null
+          || haversineKm(areaCentroid.lat, areaCentroid.lng, p.coordinates.lat, p.coordinates.lng) <= maxKm)
+          && !usedAttractions.has(placeKey(p))
       );
     const areaGroup = Array.isArray(area.attractions) ? area.attractions : [];
-    let dayAttractions = areaGroup.slice();
+    // Filter out already-used attractions from the area group
+    let dayAttractions = areaGroup.filter((x) => !usedAttractions.has(placeKey(x)));
     if (dayAttractions.length < 2 && areaCentroid) {
-      dayAttractions = dayAttractions.concat(
-        near(attractionsPool, AREA_RADIUS_KM).filter((x) => !dayAttractions.includes(x))
-      );
+      const nearby = near(attractionsPool, AREA_RADIUS_KM).filter((x) => !dayAttractions.includes(x));
+      dayAttractions = dayAttractions.concat(nearby);
     }
-    if (!dayAttractions.length) dayAttractions = attractionsPool.slice();
-    const dayRestaurants = near(restaurantsPool, LOCAL_RADIUS_KM).length ? near(restaurantsPool, LOCAL_RADIUS_KM) : restaurantsPool;
-    const dayNightlife = near(nightlifePool, LOCAL_RADIUS_KM).length ? near(nightlifePool, LOCAL_RADIUS_KM) : nightlifePool;
+    if (!dayAttractions.length) {
+      // Last resort: use the full pool but exclude already-used attractions
+      dayAttractions = attractionsPool.filter((x) => !usedAttractions.has(placeKey(x)));
+    }
+    // Filter restaurants: exclude already-used ones, prefer nearby
+    const nearbyRestaurants = near(restaurantsPool, LOCAL_RADIUS_KM);
+    const dayRestaurants = nearbyRestaurants.length > 0
+      ? nearbyRestaurants
+      : restaurantsPool.filter((x) => !usedRestaurants.has(placeKey(x)));
+    // Filter nightlife: exclude already-used ones, prefer nearby
+    const nearbyNightlife = near(nightlifePool, LOCAL_RADIUS_KM);
+    const dayNightlife = nearbyNightlife.length > 0
+      ? nearbyNightlife
+      : nightlifePool.filter((x) => !usedNightlife.has(placeKey(x)));
 
     // --- distinct place selection for this day -----------------------
     const areaPickNote = areaRepeat && areas.length > 1 ? `Area repeated: ${destination} has fewer distinct live-data zones than trip days.` : '';
@@ -533,7 +618,7 @@ export function buildDaysPlan({
           place: destination,
           description: 'Breakfast recommendation pending - live data unavailable.',
           category: 'restaurant',
-          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget' },
+          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget', source: 'budget-estimate', fetchedAt: NOW_ISO },
           source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 2,
         }));
       }
@@ -592,7 +677,7 @@ export function buildDaysPlan({
           place: destination,
           description: 'Restaurant recommendation pending - live data unavailable. Use the Restaurants page when online.',
           category: 'restaurant',
-          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget' },
+          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget', source: 'budget-estimate', fetchedAt: NOW_ISO },
           source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 2,
         }));
       }
@@ -674,7 +759,7 @@ export function buildDaysPlan({
           place: destination,
           description: 'Dinner recommendation pending - live data unavailable.',
           category: 'restaurant',
-          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget' },
+          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget', source: 'budget-estimate', fetchedAt: NOW_ISO },
           source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 2,
         }));
       }
@@ -853,6 +938,12 @@ export function buildDaysPlan({
       dayCostIsEstimate: true,
     };
   });
+
+  // ---- Post-build duplicate validation ----
+  // Verify no sightseeing attraction repeats across days. Hotels are allowed
+  // to repeat (same hotel for multi-night stay). Restaurants and attractions
+  // should NOT repeat.
+  validateNoDuplicateAttractions(days);
 
   // ---- Hard budget enforcement (before returning, so the stored total is
   //      always <= the user's budget when a budget was provided) ----

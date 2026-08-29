@@ -17,6 +17,7 @@ import localGuideAgent from '../agents/localGuide.agent.js';
 import safetyAgent from '../agents/safety.agent.js';
 import finalValidatorAgent from '../agents/finalValidator.agent.js';
 import budgetService from '../services/budget.service.js';
+import budgetEngine from '../services/budgetEngine.service.js';
 import itineraryService from '../services/itinerary.service.js';
 import { generateItinerary, getRequestCount } from '../services/itineraryGenerator.service.js';
 import placesProvider from '../providers/places.provider.js';
@@ -342,9 +343,63 @@ export async function generateTrip({ user, request }) {
     currency,
   });
   const days = plan.days;
-  const totalEstimatedCost = itineraryService.computeItineraryCost(days);
-  const isOverBudget = totalEstimatedCost > totalBudget;
+  let totalEstimatedCost = itineraryService.computeItineraryCost(days);
+  let isOverBudget = totalEstimatedCost > totalBudget;
   logger.info(`[ORCHESTRATOR] Itinerary built: ${days.length} days, estimated cost: ${totalEstimatedCost}, budget: ${totalBudget}, overBudget: ${isOverBudget}`);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // BATCH 5b: Budget Engine — iterative optimization with real alternatives
+  // ══════════════════════════════════════════════════════════════════════
+  logger.info('[ORCHESTRATOR] ═══ BATCH 5b: Budget Engine optimization ═══');
+  const nightsCount = Math.max(0, daysCount - 1);
+  const partySize = Math.max(1, (request.adults || 1) + (request.children || 0));
+  const hotelRooms = budgetService.roomsForParty({ adults: request.adults, children: request.children });
+
+  const budgetEngineResult = budgetEngine.runOptimizationLoop({
+    days,
+    transportResult,
+    hotelResult,
+    attractions: attractionResult?.data?.attractions || [],
+    restaurants: restaurantResult?.data?.restaurants || [],
+    allocation,
+    totalBudget,
+    currency,
+    nights: nightsCount,
+    rooms: hotelRooms,
+    partySize,
+    prefs,
+  });
+
+  // Apply budget engine optimizations to the itinerary
+  if (budgetEngineResult.optimization?.performed) {
+    // Recalculate costs after budget engine modifications
+    itineraryService.finalizeDayCosts(days, { partySize, totalBudget });
+    totalEstimatedCost = itineraryService.computeItineraryCost(days);
+    isOverBudget = totalEstimatedCost > totalBudget;
+    logger.info(`[ORCHESTRATOR] Budget engine applied ${budgetEngineResult.optimization.iterations} optimization(s), saving ${budgetEngineResult.optimization.totalSaving} ${currency}`);
+  }
+
+  // Validate budget result
+  const budgetValidation = budgetEngine.validateBudget(budgetEngineResult);
+  if (!budgetValidation.valid) {
+    logger.warn(`[ORCHESTRATOR] Budget validation failed: ${budgetValidation.errors.join(', ')}`);
+  }
+  report.push({
+    agent: 'budget-engine',
+    status: budgetEngineResult.budget.withinBudget ? 'success' : 'degraded',
+    message: budgetEngineResult.budget.withinBudget
+      ? `Budget optimized: ${budgetEngineResult.budget.optimizedCost} ${currency} (saved ${budgetEngineResult.optimization.totalSaving} ${currency})`
+      : `Budget not fully met: ${budgetEngineResult.budget.optimizedCost} ${currency} (over by ${budgetEngineResult.budget.overBy} ${currency})`,
+    latencyMs: 0,
+    usedAI: false,
+  });
+  logger.agent('budget-engine', 'run', {
+    status: budgetEngineResult.budget.withinBudget ? 'success' : 'degraded',
+    optimizedCost: budgetEngineResult.budget.optimizedCost,
+    overBy: budgetEngineResult.budget.overBy,
+    iterations: budgetEngineResult.optimization.iterations,
+    changes: budgetEngineResult.optimization.changes.length,
+  });
 
   logger.info('[ORCHESTRATOR] ═══ BATCH 6: Final Validator ═══');
   const validation = await finalValidatorAgent.run({
@@ -368,10 +423,10 @@ export async function generateTrip({ user, request }) {
   // ══════════════════════════════════════════════════════════════════════
   // BATCH 7: ONE Gemini API Request — generates personalized itinerary
   // ══════════════════════════════════════════════════════════════════════
-  logger.info('[ORCHESTRATOR] ═══ BATCH 7: Gemini itinerary generation ═══');
+  logger.info('[ORCHESTRATOR] ═══ BATCH 7: AI itinerary generation (Gemini → Groq fallback) ═══');
   let geminiResult = null;
   const geminiStarted = Date.now();
-  logger.info(`[ORCHESTRATOR] Calling Gemini with context: ${daysCount} days, ${currency} ${totalBudget} budget`);
+  logger.info(`[ORCHESTRATOR] Calling AI with context: ${daysCount} days, ${currency} ${totalBudget} budget`);
 
   try {
     const nightsCount = Math.max(0, daysCount - 1);
@@ -407,29 +462,42 @@ export async function generateTrip({ user, request }) {
   }
 
   const geminiLatencyMs = Date.now() - geminiStarted;
-  const geminiSuccess = geminiResult?.success === true;
-  const geminiQuotaExhausted = geminiResult?.quotaExhausted === true;
-  console.log(`[orchestrator] Gemini call: ${geminiSuccess ? 'SUCCESS' : geminiQuotaExhausted ? 'QUOTA_EXHAUSTED' : 'FAILED'} in ${geminiLatencyMs}ms (request #${getRequestCount()})`);
+  const aiSuccess = geminiResult?.success === true;
+  const aiProvider = geminiResult?.provider || null;
+  const fallbackUsed = geminiResult?.fallbackUsed === true;
+  const providerLabel = aiProvider ? (aiProvider === 'gemini' ? 'Gemini' : 'Groq') : 'none';
+  const statusLabel = aiSuccess ? `${providerLabel} SUCCESS` : 'FAILED';
+  console.log(`[orchestrator] AI call: ${statusLabel} in ${geminiLatencyMs}ms (provider: ${providerLabel}, fallback: ${fallbackUsed}, request #${getRequestCount()})`);
 
-  logger.info(`[ORCHESTRATOR] Gemini result: ${geminiSuccess ? 'SUCCESS' : geminiQuotaExhausted ? 'QUOTA_EXHAUSTED' : 'FAILED'} in ${geminiLatencyMs}ms, days: ${geminiResult?.itinerary?.days?.length || 0}`);
+  logger.info(`[ORCHESTRATOR] AI result: ${statusLabel} in ${geminiLatencyMs}ms, provider: ${providerLabel}, fallback: ${fallbackUsed}, days: ${geminiResult?.itinerary?.days?.length || 0}`);
   report.push({
     agent: 'itinerary-generator',
-    status: geminiSuccess ? 'success' : 'degraded',
-    message: geminiSuccess
-      ? `Itinerary generated in ${geminiResult.latencyMs}ms (request #${geminiResult.geminiRequestCount})`
-      : geminiQuotaExhausted
-        ? `Gemini daily quota exhausted — using deterministic plan as fallback`
-        : `Gemini failed: ${geminiResult?.error || 'unknown error'} — using deterministic plan as fallback`,
+    status: aiSuccess ? 'success' : 'degraded',
+    message: aiSuccess
+      ? `Itinerary generated by ${providerLabel}${fallbackUsed ? ' (fallback)' : ''} in ${geminiResult.latencyMs}ms (request #${geminiResult.geminiRequestCount})`
+      : `Both Gemini and Groq failed: ${geminiResult?.error || 'unknown error'} — using deterministic plan as fallback`,
     latencyMs: geminiLatencyMs,
-    usedAI: geminiSuccess,
+    usedAI: aiSuccess,
   });
 
-  logger.info('[ORCHESTRATOR] ═══ BATCH 8: Budget optimization + enriched sections ═══');
+  logger.info('[ORCHESTRATOR] ═══ BATCH 8: Enriched sections ═══');
   // ══════════════════════════════════════════════════════════════════════
-  // BATCH 8: Budget optimization + enriched itinerary sections
+  // BATCH 8: Enriched itinerary sections (budget engine already ran)
   // ══════════════════════════════════════════════════════════════════════
-  let optimized = plan.optimized;
-  if (optimized && allocation.emergencyReserve) {
+  let optimized = budgetEngineResult.optimization?.performed ? {
+    original: budgetEngineResult.budget.originalCost,
+    optimized: budgetEngineResult.budget.optimizedCost,
+    saved: budgetEngineResult.optimization.totalSaving,
+    remaining: budgetEngineResult.budget.remaining,
+    withinBudget: budgetEngineResult.budget.withinBudget,
+    iterations: budgetEngineResult.optimization.iterations,
+    changes: budgetEngineResult.optimization.changes,
+    emergencyReserve: allocation.emergencyReserve?.amount || 0,
+    notes: budgetEngineResult.budget.withinBudget
+      ? `Optimized by Budget Engine in ${budgetEngineResult.optimization.iterations} iteration(s)`
+      : `Budget not fully met after ${budgetEngineResult.optimization.iterations} iteration(s). Best plan: ${budgetEngineResult.budget.optimizedCost} ${currency}`,
+  } : plan.optimized;
+  if (optimized && allocation.emergencyReserve && !optimized.emergencyReserve) {
     optimized = { ...optimized, emergencyReserve: allocation.emergencyReserve.amount };
   }
 
@@ -601,8 +669,9 @@ export async function generateTrip({ user, request }) {
   return {
     trip,
     itinerary,
-    // Include Gemini-generated itinerary if available
-    geminiItinerary: geminiResult?.success ? geminiResult.itinerary : null,
+    // AI provider metadata
+    aiProvider: aiProvider || null,
+    fallbackUsed: fallbackUsed || false,
     agentReport: report,
     budget: {
       allocation,
@@ -614,11 +683,12 @@ export async function generateTrip({ user, request }) {
       withinBudget: budgetSummary.withinBudget,
       optimized,
     },
+    // Budget engine result
+    budgetEngine: budgetEngineResult,
     budgetSummary,
     validation: validation.data,
     pipelineMs,
     geminiRequestCount: getRequestCount(),
-    geminiQuotaExhausted: geminiQuotaExhausted || false,
     dataAvailability: {
       weatherLive: weatherResult?.data?.provider === 'live',
       flightsLive: transportResult.data?.isLive && transportResult.mode === 'flight',
@@ -642,61 +712,61 @@ export async function generateTrip({ user, request }) {
 export async function optimizeTripBudget({ trip, itinerary, user }) {
   logger.entry('[ORCHESTRATOR]', 'optimizeTripBudget', { tripId: trip._id, destination: trip.destination, budget: trip.budget.total });
   const currency = trip.budget.currency || 'INR';
-  const items = itineraryService.toCostItems(itinerary.days, currency);
   const allocation = budgetService.allocationForStyle(
     trip.preferences?.travelStyle || 'standard',
     trip.budget.total
   );
-  const opt = budgetService.optimizeCosts(items, trip.budget.total, {
-    emergencyReserve: allocation.emergencyReserve.amount,
+  const partySize = Math.max(1, Number(trip.travelers?.adults) + Number(trip.travelers?.children) || 1);
+  const nights = Math.max(0, Math.ceil((new Date(trip.endDate) - new Date(trip.startDate)) / (1000 * 60 * 60 * 24)));
+  const rooms = budgetService.roomsForParty({ adults: trip.travelers?.adults, children: trip.travelers?.children });
+
+  // Use the Budget Engine for re-optimization
+  const budgetEngineResult = budgetEngine.runOptimizationLoop({
+    days: itinerary.days,
+    transportResult: null, // No fresh transport data for re-optimization
+    hotelResult: null, // No fresh hotel data for re-optimization
+    attractions: [],
+    restaurants: [],
+    allocation,
+    totalBudget: trip.budget.total,
+    currency,
+    nights,
+    rooms,
+    partySize,
+    prefs: trip.preferences || {},
   });
 
-  const dayIndexById = {};
-  for (const day of itinerary.days) {
-    (day.activities || []).forEach((act, i) => {
-      dayIndexById[itineraryService.activityItemId(day.dayNumber, i)] = act;
-    });
+  // Apply budget engine optimizations
+  if (budgetEngineResult.optimization?.performed) {
+    itineraryService.finalizeDayCosts(itinerary.days, { partySize, totalBudget: trip.budget.total });
   }
-  for (const r of opt.reductions) {
-    const act = dayIndexById[r.id];
-    if (act && act.cost) {
-      act.cost.amount = r.to;
-      act.cost.isEstimate = true;
-      act.cost.estimateNote = r.note;
-    }
-  }
-  for (const d of opt.dropped) {
-    const act = dayIndexById[d.id];
-    if (act) {
-      act.notes = 'Removed by Budget Optimizer';
-      act.dataStatus = 'unavailable';
-      act.cost.amount = 0;
-    }
-  }
-  itineraryService.finalizeDayCosts(itinerary.days, {
-    partySize: Math.max(1, Number(trip.travelers?.adults) + Number(trip.travelers?.children) || 1),
-    totalBudget: trip.budget.total,
-  });
-  itinerary.totalEstimatedCost = opt.optimized;
+
+  itinerary.totalEstimatedCost = budgetEngineResult.budget.optimizedCost;
   itinerary.budgetAllocation = allocation;
   itinerary.optimizedBudget = {
-    ...opt,
+    original: budgetEngineResult.budget.originalCost,
+    optimized: budgetEngineResult.budget.optimizedCost,
+    saved: budgetEngineResult.optimization.totalSaving,
+    remaining: budgetEngineResult.budget.remaining,
+    withinBudget: budgetEngineResult.budget.withinBudget,
+    iterations: budgetEngineResult.optimization.iterations,
+    changes: budgetEngineResult.optimization.changes,
     emergencyReserve: allocation.emergencyReserve.amount,
-    notes: 'Optimized by Budget Agent: dropped low-priority items and reduced flexible costs.',
+    notes: `Optimized by Budget Engine in ${budgetEngineResult.optimization.iterations} iteration(s)`,
   };
   for (const day of itinerary.days) {
     if (typeof day.markModified === 'function') day.markModified('costBreakdown');
   }
   await itinerary.save();
 
-  trip.totalOptimizedCost = opt.optimized;
-  trip.moneySaved = opt.saved;
-  trip.isOverBudget = !opt.withinBudget;
+  trip.totalOptimizedCost = budgetEngineResult.budget.optimizedCost;
+  trip.moneySaved = budgetEngineResult.optimization.totalSaving;
+  trip.isOverBudget = !budgetEngineResult.budget.withinBudget;
   await trip.save();
 
-  await notifyBudgetOptimized(user._id.toString(), trip._id, opt.saved);
-  logger.exit('[ORCHESTRATOR]', 'optimizeTripBudget', { status: 'success', saved: opt.saved, optimized: opt.optimized, withinBudget: opt.withinBudget });
-  return { ...opt, allocation, currency };
+  await notifyBudgetOptimized(user._id.toString(), trip._id, budgetEngineResult.optimization.totalSaving);
+  logger.exit('[ORCHESTRATOR]', 'optimizeTripBudget', { status: 'success', saved: budgetEngineResult.optimization.totalSaving, optimized: budgetEngineResult.budget.optimizedCost, withinBudget: budgetEngineResult.budget.withinBudget });
+  return { ...budgetEngineResult.budget, allocation, currency, optimization: budgetEngineResult.optimization };
 }
 
 export default { generateTrip, optimizeTripBudget };

@@ -26,6 +26,7 @@ export const providers = {
 export function providerStatuses() {
   return [
     { name: 'Gemini AI', configured: Boolean(env.GEMINI_API_KEY), kind: 'ai' },
+    { name: 'Groq AI (Fallback)', configured: Boolean(env.GROQ_API_KEY), kind: 'ai' },
     { name: 'Geoapify (Maps & Places)', configured: Boolean(env.GEOAPIFY_API_KEY), kind: 'maps' },
     { name: 'OpenWeatherMap', configured: Boolean(env.OPENWEATHER_API_KEY), kind: 'weather' },
     { name: 'AviationStack (Flights)', configured: Boolean(env.AVIATIONSTACK_API_KEY), kind: 'flights' },

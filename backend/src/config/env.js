@@ -30,6 +30,11 @@ const env = {
 
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
+  GEMINI_TIMEOUT_MS: parseInt(process.env.GEMINI_TIMEOUT_MS, 10) || 45000,
+
+  GROQ_API_KEY: process.env.GROQ_API_KEY || '',
+  GROQ_MODEL: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+  GROQ_TIMEOUT_MS: parseInt(process.env.GROQ_TIMEOUT_MS, 10) || 60000,
 
   GEOAPIFY_API_KEY: process.env.GEOAPIFY_API_KEY || '',
   OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || '',

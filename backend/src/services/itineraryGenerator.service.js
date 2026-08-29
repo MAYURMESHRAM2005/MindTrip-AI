@@ -1,25 +1,24 @@
 import geminiService from './gemini.service.js';
+import groqService from './groq.service.js';
 import env from '../config/env.js';
 
 /**
- * Centralized Itinerary Generator Service.
+ * Centralized Itinerary Generator Service with AI Fallback.
  *
  * Makes EXACTLY ONE Gemini API request with the complete structured travel
- * context. Gemini generates the final personalized day-wise itinerary from
- * real collected API data — it NEVER invents flights, trains, buses, hotels,
- * prices, weather, routes or availability.
+ * context. If Gemini fails (API error, timeout, rate limit, quota, invalid
+ * JSON, etc.), automatically falls back to Groq with the SAME context.
  *
  * Design principles:
- *  - ONE Gemini call per trip request (enforced)
- *  - Only real API data is sent; missing data is marked "unavailable"
- *  - Normalized & minimized context to reduce token usage and latency
- *  - Structured JSON output for fast frontend rendering
- *  - Timeout, retry and graceful failure handling
- *  - Schema validation catches malformed Gemini output
+ *  - Gemini is always tried FIRST (primary provider)
+ *  - Groq is called ONLY when Gemini fails (fallback)
+ *  - Same normalized context is reused — no re-collection of travel data
+ *  - One AI provider is called at a time (sequential, not parallel)
+ *  - Schema validation catches malformed output from either provider
+ *  - Timeout is configurable via environment variables
  */
 
-const GEMINI_TIMEOUT_MS = 45000;
-const GEMINI_MODEL = env.GEMINI_MODEL || 'gemini-3.5-flash';
+const GEMINI_TIMEOUT_MS = env.GEMINI_TIMEOUT_MS || 45000;
 
 let geminiRequestCount = 0;
 
@@ -569,99 +568,156 @@ function normalizeTransport(transport) {
 // ══════════════════════════════════════════════════════════════════════
 
 /**
+ * Validate a raw LLM response into a usable itinerary.
+ * Sanitize → schema validate → enforce data integrity → recalculate costs.
+ * Shared by both Gemini and Groq paths.
+ *
+ * @returns {{ valid: boolean, itinerary: object|null, errors: string[] }}
+ */
+function validateAndPrepareItinerary(raw, context) {
+  const sanitized = sanitizeItinerary(raw);
+  if (!sanitized) {
+    return { valid: false, itinerary: null, errors: ['Response could not be sanitized into valid structure'] };
+  }
+  const validation = validateItinerarySchema(sanitized);
+  if (!validation.valid) {
+    return { valid: false, itinerary: null, errors: validation.errors };
+  }
+  const itinerary = validation.data;
+  enforceDataIntegrity(itinerary, context);
+  recalculateDayCosts(itinerary);
+  return { valid: true, itinerary, errors: [] };
+}
+
+/**
  * Generate the final personalized day-wise itinerary from complete context.
- * Makes EXACTLY ONE Gemini API request.
+ * Tries Gemini FIRST. If Gemini fails, automatically falls back to Groq
+ * with the SAME normalized context.
  *
  * @param {object} data - Complete aggregated travel context
- * @returns {object} - { success, itinerary, error, geminiRequestCount, latencyMs, validationErrors }
+ * @returns {object} - { success, itinerary, provider, fallbackUsed, error, geminiRequestCount, latencyMs, validationErrors }
  */
 export async function generateItinerary(data) {
   const started = Date.now();
   const requestNumber = ++geminiRequestCount;
+  const userId = data.userId || null;
 
   console.log(`[itineraryGenerator] Request #${requestNumber} starting at ${new Date().toISOString()}`);
 
-  // 1. Build normalized context (minimized for token efficiency)
+  // 1. Build normalized context ONCE (reused for both providers)
   const context = buildContext(data);
 
-  // 2. Construct the single Gemini prompt
+  // 2. Construct prompts ONCE (reused for both providers)
   const systemPrompt = buildSystemPrompt();
   const userPrompt = buildUserPrompt(context, data);
 
-  // 3. Make the ONE Gemini API request with timeout
-  const result = await callGeminiWithTimeout({
+  // ══════════════════════════════════════════════════════════════════
+  //  STEP 1: Try Gemini (primary)
+  // ══════════════════════════════════════════════════════════════════
+  let geminiFailed = false;
+  let geminiError = null;
+
+  console.log('[AI] Trying Gemini');
+  const geminiStarted = Date.now();
+  const geminiResult = await callLLMWithTimeout({
+    service: geminiService,
     prompt: userPrompt,
     system: systemPrompt,
     agent: 'itinerary-generator',
     action: 'generateItinerary',
-    userId: data.userId || null,
+    userId,
     timeoutMs: GEMINI_TIMEOUT_MS,
+    providerName: 'Gemini',
   });
+  const geminiLatencyMs = Date.now() - geminiStarted;
 
-  const latencyMs = Date.now() - started;
-  console.log(`[itineraryGenerator] Request #${requestNumber} completed in ${latencyMs}ms — success: ${result.success}`);
-
-  if (!result.success) {
-    console.warn(`[itineraryGenerator] Gemini failed: ${result.message}`);
-    return {
-      success: false,
-      itinerary: null,
-      error: result.message,
-      geminiRequestCount: requestNumber,
-      latencyMs,
-      validationErrors: [],
-    };
-  }
-
-  // 4. Sanitize — fix common Gemini shape mistakes before validation
-  const sanitized = sanitizeItinerary(result.data);
-  if (!sanitized) {
-    console.warn('[itineraryGenerator] Gemini response could not be sanitized');
-    return {
-      success: false,
-      itinerary: null,
-      error: 'Gemini response could not be sanitized into valid structure',
-      geminiRequestCount: requestNumber,
-      latencyMs,
-      validationErrors: [],
-    };
-  }
-
-  // 5. Schema validation — catch any remaining structural issues
-  const validation = validateItinerarySchema(sanitized);
-  if (!validation.valid) {
-    console.warn(`[itineraryGenerator] Schema validation failed (${validation.errors.length} errors):`);
-    for (const err of validation.errors.slice(0, 5)) {
-      console.warn(`  - ${err}`);
+  if (geminiResult.success && geminiResult.data) {
+    const checked = validateAndPrepareItinerary(geminiResult.data, context);
+    if (checked.valid) {
+      const totalLatencyMs = Date.now() - started;
+      console.log(`[AI] Gemini success (${geminiLatencyMs}ms)`);
+      return {
+        success: true,
+        itinerary: checked.itinerary,
+        provider: 'gemini',
+        fallbackUsed: false,
+        error: null,
+        geminiRequestCount: requestNumber,
+        latencyMs: totalLatencyMs,
+        validationErrors: [],
+      };
     }
-    if (validation.errors.length > 5) {
-      console.warn(`  ... and ${validation.errors.length - 5} more`);
+    // Gemini returned data but it failed validation
+    geminiFailed = true;
+    geminiError = `Gemini validation failed: ${checked.errors[0]}`;
+    console.warn(`[AI] Gemini failed: ${geminiError}`);
+  } else {
+    // Gemini returned an error or no data
+    geminiFailed = true;
+    geminiError = geminiResult.message || 'Gemini request failed';
+    console.warn(`[AI] Gemini failed: ${geminiError}`);
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  //  STEP 2: Fallback to Groq (same context, sequential)
+  // ══════════════════════════════════════════════════════════════════
+  console.log('[AI] Falling back to Groq');
+  const groqStarted = Date.now();
+  const groqResult = await callLLMWithTimeout({
+    service: groqService,
+    prompt: userPrompt,
+    system: systemPrompt,
+    agent: 'itinerary-generator',
+    action: 'generateItinerary',
+    userId,
+    timeoutMs: env.GROQ_TIMEOUT_MS || 60000,
+    providerName: 'Groq',
+  });
+  const groqLatencyMs = Date.now() - groqStarted;
+
+  if (groqResult.success && groqResult.data) {
+    const checked = validateAndPrepareItinerary(groqResult.data, context);
+    if (checked.valid) {
+      const totalLatencyMs = Date.now() - started;
+      console.log(`[AI] Groq success (${groqLatencyMs}ms)`);
+      return {
+        success: true,
+        itinerary: checked.itinerary,
+        provider: 'groq',
+        fallbackUsed: true,
+        error: null,
+        geminiRequestCount: requestNumber,
+        latencyMs: totalLatencyMs,
+        validationErrors: [],
+      };
     }
+    // Groq returned data but it failed validation
+    const totalLatencyMs = Date.now() - started;
+    console.warn(`[AI] Groq returned invalid itinerary: ${checked.errors[0]}`);
     return {
       success: false,
       itinerary: null,
-      error: `Schema validation failed: ${validation.errors[0]}`,
+      provider: 'groq',
+      fallbackUsed: true,
+      error: `Both Gemini and Groq failed. Groq validation: ${checked.errors[0]}. Gemini error: ${geminiError}`,
       geminiRequestCount: requestNumber,
-      latencyMs,
-      validationErrors: validation.errors,
+      latencyMs: totalLatencyMs,
+      validationErrors: checked.errors,
     };
   }
 
-  // 6. Data integrity enforcement — mark invented data as unavailable
-  const itinerary = validation.data;
-  enforceDataIntegrity(itinerary, context);
-
-  // 7. Recalculate day costs from activities (ensure consistency)
-  recalculateDayCosts(itinerary);
-
-  console.log(`[itineraryGenerator] Validation passed — ${itinerary.days.length} days, ${countActivities(itinerary)} activities`);
-
+  // Both providers failed
+  const totalLatencyMs = Date.now() - started;
+  const groqError = groqResult.message || 'Groq request failed';
+  console.error(`[AI] Both Gemini and Groq failed. Gemini: ${geminiError} | Groq: ${groqError}`);
   return {
-    success: true,
-    itinerary,
-    error: null,
+    success: false,
+    itinerary: null,
+    provider: null,
+    fallbackUsed: true,
+    error: 'Unable to generate itinerary at the moment. Please try again.',
     geminiRequestCount: requestNumber,
-    latencyMs,
+    latencyMs: totalLatencyMs,
     validationErrors: [],
   };
 }
@@ -965,23 +1021,27 @@ Generate the best feasible itinerary based on this information. Return ONLY the 
 }
 
 // ══════════════════════════════════════════════════════════════════════
-//  GEMINI CALL HELPER
+//  GENERIC LLM CALL HELPER (works with Gemini or Groq)
 // ══════════════════════════════════════════════════════════════════════
 
-async function callGeminiWithTimeout({ prompt, system, agent, action, userId, timeoutMs }) {
+/**
+ * Call any LLM service (Gemini or Groq) with a configurable timeout.
+ * The service must implement generateJSON({ prompt, system, agent, action, userId }).
+ */
+async function callLLMWithTimeout({ service, prompt, system, agent, action, userId, timeoutMs, providerName }) {
   const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => reject(new Error(`Gemini request timed out after ${timeoutMs}ms`)), timeoutMs);
+    setTimeout(() => reject(new Error(`${providerName} request timed out after ${timeoutMs}ms`)), timeoutMs);
   });
 
   try {
     const result = await Promise.race([
-      geminiService.generateJSON({ prompt, system, agent, action, userId }),
+      service.generateJSON({ prompt, system, agent, action, userId }),
       timeoutPromise,
     ]);
     return result;
   } catch (err) {
-    console.error(`[itineraryGenerator] Gemini error: ${err.message}`);
-    return { success: false, data: null, message: err.message || 'Gemini request failed' };
+    console.error(`[itineraryGenerator] ${providerName} error: ${err.message}`);
+    return { success: false, data: null, message: err.message || `${providerName} request failed` };
   }
 }
 
