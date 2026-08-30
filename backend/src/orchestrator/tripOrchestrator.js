@@ -1,3 +1,4 @@
+import env from '../config/env.js';
 import logger from '../utils/logger.js';
 import Trip from '../models/Trip.js';
 import Itinerary from '../models/Itinerary.js';
@@ -15,10 +16,11 @@ import weatherAgent from '../agents/weather.agent.js';
 import trafficAgent from '../agents/traffic.agent.js';
 import localGuideAgent from '../agents/localGuide.agent.js';
 import safetyAgent from '../agents/safety.agent.js';
+import culturalEventsAgent from '../agents/culturalEvents.agent.js';
 import finalValidatorAgent from '../agents/finalValidator.agent.js';
 import budgetService from '../services/budget.service.js';
 import budgetEngine from '../services/budgetEngine.service.js';
-import itineraryService from '../services/itinerary.service.js';
+import itineraryService, { setRouteCache } from '../services/itinerary.service.js';
 import { generateItinerary, getRequestCount } from '../services/itineraryGenerator.service.js';
 import placesProvider from '../providers/places.provider.js';
 import mapsProvider from '../providers/maps.provider.js';
@@ -33,6 +35,103 @@ function fmtDate(d) {
 function inferTransportMode({ origin, destination, transportPreference }) {
   if (transportPreference) return transportPreference;
   return 'flight';
+}
+
+/**
+ * Pre-fetch real driving routes between all activity coordinate pairs.
+ * Returns a Map of "lat1,lng1|lat2,lng2" → { distanceKm, durationMin, method }.
+ * This allows the day builder to use real routes instead of haversine estimates.
+ * All route requests run in parallel for performance.
+ */
+async function prefetchActivityRoutes({ attractions, restaurants, hotelResult, destination }) {
+  const routeCache = new Map();
+  if (!env.GEOAPIFY_API_KEY) return routeCache;
+
+  // Collect all unique coordinate pairs that will need routes
+  const coords = [];
+
+  // Hotel coordinates
+  const hotel = hotelResult?.data?.recommended;
+  if (hotel?.latitude != null && hotel?.longitude != null) {
+    coords.push({ lat: Number(hotel.latitude), lng: Number(hotel.longitude), label: 'hotel' });
+  }
+
+  // Attraction coordinates
+  for (const a of attractions || []) {
+    if (a.coordinates?.lat != null && a.coordinates?.lng != null) {
+      coords.push({ ...a.coordinates, label: 'attraction', name: a.name });
+    }
+  }
+
+  // Restaurant coordinates
+  for (const r of restaurants || []) {
+    if (r.coordinates?.lat != null && r.coordinates?.lng != null) {
+      coords.push({ ...r.coordinates, label: 'restaurant', name: r.name });
+    }
+  }
+
+  if (coords.length < 2) return routeCache;
+
+  // Build unique pairs (hotel↔each place, and adjacent places)
+  const pairs = [];
+  const hotelCoord = coords.find((c) => c.label === 'hotel');
+  const placeCoords = coords.filter((c) => c.label !== 'hotel');
+
+  // Hotel ↔ each place
+  if (hotelCoord) {
+    for (const place of placeCoords) {
+      pairs.push([hotelCoord, place]);
+    }
+  }
+
+  // Adjacent places (for consecutive activities)
+  for (let i = 0; i < placeCoords.length - 1; i++) {
+    pairs.push([placeCoords[i], placeCoords[i + 1]]);
+  }
+
+  // Deduplicate pairs
+  const seen = new Set();
+  const uniquePairs = [];
+  for (const [a, b] of pairs) {
+    const key = `${a.lat},${a.lng}|${b.lat},${b.lng}`;
+    const revKey = `${b.lat},${b.lng}|${a.lat},${a.lng}`;
+    if (!seen.has(key) && !seen.has(revKey)) {
+      seen.add(key);
+      uniquePairs.push([a, b]);
+    }
+  }
+
+  // Fetch routes in parallel (batches of 10 to avoid rate limits)
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < uniquePairs.length; i += BATCH_SIZE) {
+    const batch = uniquePairs.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(([a, b]) =>
+        mapsProvider.directions(`${a.lat},${a.lng}`, `${b.lat},${b.lng}`, 'driving', false)
+          .then((result) => ({ a, b, result }))
+      )
+    );
+
+    for (const settled of results) {
+      if (settled.status !== 'fulfilled') continue;
+      const { a, b, result } = settled.value;
+      if (result?.isLive && result.data?.routes?.length) {
+        const route = result.data.routes[0];
+        const km = route.distanceKm || 0;
+        const min = route.durationMin || 0;
+        // Determine method based on distance
+        const method = km < 1.5 ? 'walking' : km < 12 ? 'taxi/auto' : 'bus/metro';
+        const forwardKey = `${a.lat},${a.lng}|${b.lat},${b.lng}`;
+        const reverseKey = `${b.lat},${b.lng}|${a.lat},${a.lng}`;
+        const entry = { distanceKm: km, durationMin: min, method, source: 'geoapify-routes' };
+        routeCache.set(forwardKey, entry);
+        routeCache.set(reverseKey, entry);
+      }
+    }
+  }
+
+  logger.info(`[ORCHESTRATOR] Pre-fetched ${routeCache.size / 2} real routes for intra-day travel`);
+  return routeCache;
 }
 
 /**
@@ -122,6 +221,7 @@ export async function generateTrip({ user, request }) {
     restaurantResult,
     guideResult,
     safetyResult,
+    eventsResult,
   ] = await Promise.all([
     runWithTimeout(
       () => weatherAgent.run({ destination, startDate: fmtDate(request.startDate), endDate: fmtDate(request.endDate), userId }),
@@ -157,6 +257,16 @@ export async function generateTrip({ user, request }) {
       () => safetyAgent.run({ destination, userId }),
       'safety'
     ),
+    runWithTimeout(
+      () => culturalEventsAgent.run({
+        destination,
+        startDate: fmtDate(request.startDate),
+        endDate: fmtDate(request.endDate),
+        interests: prefs.interests || [],
+        userId,
+      }),
+      'culturalEvents'
+    ),
   ]);
 
   // Traffic agent runs after hotelResult is available (needs hotel name)
@@ -173,7 +283,8 @@ export async function generateTrip({ user, request }) {
   if (trafficResult) { report.push(trafficAgent.report(trafficResult)); logger.agent('traffic', 'run', { status: trafficResult.status, isLive: trafficResult.data?.isLive }); }
   if (guideResult) { report.push(localGuideAgent.report(guideResult)); logger.agent('localGuide', 'run', { status: guideResult.status }); }
   if (safetyResult) { report.push(safetyAgent.report(safetyResult)); logger.agent('safety', 'run', { status: safetyResult.status }); }
-  logger.info('[ORCHESTRATOR] Batch 2 results: weather=' + (weatherResult?.status || 'null') + ', hotel=' + (hotelResult?.status || 'null') + ', attractions=' + (attractionResult?.data?.attractions?.length || 0) + ', restaurants=' + (restaurantResult?.data?.restaurants?.length || 0) + ', traffic=' + (trafficResult?.status || 'null'));
+  if (eventsResult) { report.push(culturalEventsAgent.report(eventsResult)); logger.agent('culturalEvents', 'run', { status: eventsResult.status, eventCount: eventsResult.data?.totalEvents || 0, daysWithEvents: eventsResult.data?.daysWithEvents || 0 }); }
+  logger.info('[ORCHESTRATOR] Batch 2 results: weather=' + (weatherResult?.status || 'null') + ', hotel=' + (hotelResult?.status || 'null') + ', attractions=' + (attractionResult?.data?.attractions?.length || 0) + ', restaurants=' + (restaurantResult?.data?.restaurants?.length || 0) + ', events=' + (eventsResult?.data?.totalEvents || 0));
 
   logger.info('[ORCHESTRATOR] ═══ BATCH 2b: Nightlife (geocoding + nearby search) ═══');
   // ══════════════════════════════════════════════════════════════════════
@@ -308,6 +419,34 @@ export async function generateTrip({ user, request }) {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════════
+  // BATCH 3b: Return transport search (destination → origin)
+  // Runs after outbound transport so transportMode is defined.
+  // ══════════════════════════════════════════════════════════════════════
+  let returnTransportResult = null;
+  if (request.origin) {
+    try {
+      returnTransportResult = await transportIntel.findTransportOptions({
+        origin: destination,
+        destination: request.origin,
+        departDate: fmtDate(request.endDate),
+        returnDate: fmtDate(request.endDate),
+        adults: request.adults,
+        children: request.children,
+        preference: prefs.transportPreference || transportMode,
+        budget: allocation.transport?.amount || 0,
+        currency,
+      });
+      if (returnTransportResult?.recommended) {
+        logger.info(`[ORCHESTRATOR] Return transport: ${returnTransportResult.recommended.name} (${returnTransportResult.recommended.mode})`);
+      } else {
+        logger.info('[ORCHESTRATOR] Return transport: no live options found');
+      }
+    } catch (err) {
+      logger.warn(`[ORCHESTRATOR] Return transport search failed: ${err.message}`);
+    }
+  }
+
   logger.info('[ORCHESTRATOR] ═══ BATCH 4: Deterministic budget agent ═══');
   const budgetResult = await budgetAgent.run({
     allocation,
@@ -324,6 +463,15 @@ export async function generateTrip({ user, request }) {
   report.push(budgetAgent.report(budgetResult));
   logger.agent('budget', 'run', { status: budgetResult.status, suggestions: budgetResult.data?.suggestions?.length || 0, risks: budgetResult.data?.risks?.length || 0 });
 
+  logger.info('[ORCHESTRATOR] ═══ BATCH 4b: Pre-fetch real routes for intra-day travel ═══');
+  const routeCache = await prefetchActivityRoutes({
+    attractions: attractionResult?.data?.attractions || [],
+    restaurants: restaurantResult?.data?.restaurants || [],
+    hotelResult,
+    destination,
+  });
+  setRouteCache(routeCache);
+
   logger.info('[ORCHESTRATOR] ═══ BATCH 5: Build deterministic day-by-day itinerary ═══');
   const plan = itineraryService.buildDaysPlan({
     origin: request.origin,
@@ -334,6 +482,7 @@ export async function generateTrip({ user, request }) {
     prefs,
     hotelResult,
     transportResult,
+    returnTransportResult,
     weatherResult,
     attractions: attractionResult?.data?.attractions || [],
     restaurants: restaurantResult?.data?.restaurants || [],
@@ -450,6 +599,7 @@ export async function generateTrip({ user, request }) {
       traffic: trafficResult?.data || {},
       guide: guideResult?.data || {},
       safety: safetyResult?.data || {},
+      events: eventsResult?.data || null,
       budgetAllocation: allocation,
       totalEstimatedCost,
       isOverBudget,
@@ -698,6 +848,8 @@ export async function generateTrip({ user, request }) {
       attractionsLive: attractionResult?.data?.isLive,
       restaurantsLive: restaurantResult?.data?.isLive,
       nightlifeLive: nightlifeData.length > 0,
+      eventsLive: eventsResult?.status === 'success',
+      eventsCount: eventsResult?.data?.totalEvents || 0,
       transportModesChecked: transportIntelResult?.summary?.modesChecked || transportResult.data?.modesChecked || [],
       transportAlternatives: transportIntelResult?.options?.length || 0,
       originGeo: transportIntelResult?.originGeo || null,

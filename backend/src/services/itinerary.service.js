@@ -220,8 +220,27 @@ function validateNoDuplicateAttractions(days) {
 
 function restaurantMealCost(r, meal, partySize, currency) {
   const cur = currency || 'INR';
-  // Geoapify does not provide actual menu prices. Use priceLevel as a proxy
-  // and ALWAYS mark as estimate — never present as a real API price.
+
+  // Use Zomato real average cost when available (not an estimate)
+  if (r.zomatoData && r.zomatoData.averageCostPerPerson > 0) {
+    let perPerson = r.zomatoData.averageCostPerPerson;
+    // Adjust per meal type: breakfast ~60%, lunch ~85%, dinner ~115% of average
+    if (meal === 'breakfast') perPerson = Math.max(80, Math.round(perPerson * 0.6));
+    else if (meal === 'lunch') perPerson = Math.round(perPerson * 0.85);
+    else if (meal === 'dinner') perPerson = Math.round(perPerson * 1.15);
+    const amount = Math.round(perPerson * partySize * 100) / 100;
+    return {
+      amount,
+      perPerson,
+      currency: cur,
+      isEstimate: false,
+      estimateNote: `Real average cost from Zomato (${meal}) × ${partySize} traveller(s) — ${r.zomatoData.ratingText || 'rated'} ${r.zomatoData.rating ?? ''} (${r.zomatoData.votes ?? 0} votes)`,
+      source: 'zomato',
+      fetchedAt: r.zomatoData.fetchedAt || NOW_ISO,
+    };
+  }
+
+  // Fallback: Geoapify priceLevel estimate (always marked as estimate)
   const base = RESTAURANT_PRICE_BY_LEVEL[r.priceLevel ?? 1] ?? 350;
   let perPerson = base;
   if (meal === 'breakfast') perPerson = Math.max(80, Math.round(base * 0.6));
@@ -250,6 +269,21 @@ function entryFeeEstimateFor(attraction) {
 }
 
 function attractionCost(a, currency, partySize) {
+  // Use Viator real pricing when available (not an estimate)
+  if (a.entryFee && typeof a.entryFee.amount === 'number' && a.entryFee.amount > 0) {
+    const perPerson = a.entryFee.amount;
+    const cur = a.entryFee.currency || currency || 'INR';
+    return {
+      amount: Math.round(perPerson * partySize * 100) / 100,
+      perPerson,
+      currency: cur,
+      isEstimate: false,
+      estimateNote: `Real price from Viator (${a.entryFee.productTitle || a.entryFee.source}) × ${partySize} traveller(s)`,
+      source: 'viator',
+      fetchedAt: a.entryFee.fetchedAt || NOW_ISO,
+    };
+  }
+  // Fallback to estimate when no Viator data is available
   const fee = entryFeeEstimateFor(a);
   const perPerson = fee.amount;
   return {
@@ -263,10 +297,42 @@ function attractionCost(a, currency, partySize) {
   };
 }
 
+/**
+ * Look up a cached real route between two coordinate pairs.
+ * The routeCache is a Map built by the orchestrator before calling buildDaysPlan.
+ * Keys are "lat1,lng1|lat2,lng2" strings.
+ * Falls back to haversine estimate when no cached route is available.
+ */
+let _routeCache = null;
+
+export function setRouteCache(cache) {
+  _routeCache = cache;
+}
+
+function routeCacheKey(a, b) {
+  return `${a.coordinates.lat},${a.coordinates.lng}|${b.coordinates.lat},${b.coordinates.lng}`;
+}
+
 function travelBetween(a, b) {
   if (!a?.coordinates || !b?.coordinates) {
     return { distanceKm: 0, durationMin: 15, method: 'walking', isEstimate: true };
   }
+
+  // Try real route from cache first
+  const cacheKey = routeCacheKey(a, b);
+  const reverseKey = routeCacheKey(b, a);
+  const cached = (_routeCache && (_routeCache.get(cacheKey) || _routeCache.get(reverseKey))) || null;
+  if (cached) {
+    return {
+      distanceKm: cached.distanceKm,
+      durationMin: cached.durationMin,
+      method: cached.method || 'taxi/auto',
+      isEstimate: false,
+      source: 'geoapify-routes',
+    };
+  }
+
+  // Fallback: haversine estimate
   const km = haversineKm(a.coordinates.lat, a.coordinates.lng, b.coordinates.lat, b.coordinates.lng);
   const method = km < 1.5 ? 'walking' : km < 12 ? 'taxi/auto' : 'bus/metro';
   const speedKmh = method === 'walking' ? 4.5 : method === 'taxi/auto' ? 30 : 25;
@@ -302,6 +368,74 @@ function isEveningPick(p) {
   const name = String(p?.name || '').toLowerCase();
   const types = (p?.types || []).join(' ').toLowerCase();
   return /beach|viewpoint|sunset|garden|park|promenade|harbor|harbour|market|square|plaza|waterfront|club/.test(name + ' ' + types);
+}
+
+/**
+ * Check if a place is likely open in the evening (after 17:00).
+ * Museums, galleries, and government buildings typically close by 17:00-18:00.
+ * Markets, waterfronts, beaches, restaurants, and entertainment venues stay open late.
+ */
+function isLikelyOpenEvening(p) {
+  // If we have real opening hours, use them
+  if (p.openingHours?.periods?.length) {
+    return isPlaceOpenAt(p.openingHours, 18); // 6 PM
+  }
+  const name = String(p?.name || '').toLowerCase();
+  const types = (p?.types || []).join(' ').toLowerCase();
+  // Places that are typically closed in the evening
+  const closedEvening = /museum|gallery|monument|fort|palace|government|office|bank|library|post office/.test(name + ' ' + types);
+  // Places that are typically open in the evening
+  const openEvening = /market|bazaar|nightlife|bar|club|restaurant|beach|waterfront|promenade|garden|park|square|plaza|viewpoint|sunset|entertainment|theatre|cinema|shopping|mall/.test(name + ' ' + types);
+  if (closedEvening) return false;
+  if (openEvening) return true;
+  // Default: assume open (we can't know for sure without opening hours API)
+  return true;
+}
+
+/**
+ * Check if a place is open at a given hour using parsed opening hours.
+ * @param {object} openingHours - Parsed opening hours from Geoapify
+ * @param {number} hour - Hour to check (0-23)
+ * @param {string} dayOfWeek - Optional day abbreviation (Mo, Tu, We, Th, Fr, Sa, Su)
+ * @returns {boolean}
+ */
+function isPlaceOpenAt(openingHours, hour, dayOfWeek) {
+  if (!openingHours?.periods?.length) return true; // No data = assume open
+  
+  for (const period of openingHours.periods) {
+    // Check if this period applies to the given day
+    if (dayOfWeek && !period.days.includes('all') && !period.days.includes(dayOfWeek)) {
+      continue;
+    }
+    
+    const [openH, openM] = period.open.split(':').map(Number);
+    const [closeH, closeM] = period.close.split(':').map(Number);
+    const openMinutes = openH * 60 + (openM || 0);
+    const closeMinutes = closeH * 60 + (closeM || 0);
+    const checkMinutes = hour * 60;
+    
+    // Handle overnight hours (e.g., 22:00-06:00)
+    if (closeMinutes < openMinutes) {
+      if (checkMinutes >= openMinutes || checkMinutes < closeMinutes) return true;
+    } else {
+      if (checkMinutes >= openMinutes && checkMinutes < closeMinutes) return true;
+    }
+  }
+  
+  return false;
+}
+
+/**
+ * Get the best time slot for an attraction based on opening hours.
+ * Returns the recommended hour (0-23) or null if unknown.
+ */
+function getBestTimeSlot(openingHours) {
+  if (!openingHours?.periods?.length) return null;
+  
+  // Find the opening time of the first period
+  const period = openingHours.periods[0];
+  const [openH] = period.open.split(':').map(Number);
+  return openH;
 }
 
 /** Key used to dedupe a place across the whole trip. */
@@ -406,6 +540,7 @@ export function buildDaysPlan({
   prefs,
   hotelResult,
   transportResult,
+  returnTransportResult,
   weatherResult,
   attractions,
   restaurants,
@@ -462,17 +597,19 @@ export function buildDaysPlan({
     // its geographic region), supplemented by nearby places only when the area
     // has too few real options, then the full list as a last resort.
     // CRITICAL: Exclude already-used places from pools to prevent cross-day repeats.
-    const near = (pool, maxKm) =>
+    // The usedKeys parameter allows filtering by the correct Set for each pool type
+    // (usedAttractions for attractions, usedRestaurants for restaurants, etc.).
+    const near = (pool, maxKm, usedKeys) =>
       (pool || []).filter(
         (p) => (!areaCentroid || p.coordinates?.lat == null
           || haversineKm(areaCentroid.lat, areaCentroid.lng, p.coordinates.lat, p.coordinates.lng) <= maxKm)
-          && !usedAttractions.has(placeKey(p))
+          && !(usedKeys || usedAttractions).has(placeKey(p))
       );
     const areaGroup = Array.isArray(area.attractions) ? area.attractions : [];
     // Filter out already-used attractions from the area group
     let dayAttractions = areaGroup.filter((x) => !usedAttractions.has(placeKey(x)));
     if (dayAttractions.length < 2 && areaCentroid) {
-      const nearby = near(attractionsPool, AREA_RADIUS_KM).filter((x) => !dayAttractions.includes(x));
+      const nearby = near(attractionsPool, AREA_RADIUS_KM, usedAttractions).filter((x) => !dayAttractions.includes(x));
       dayAttractions = dayAttractions.concat(nearby);
     }
     if (!dayAttractions.length) {
@@ -480,12 +617,12 @@ export function buildDaysPlan({
       dayAttractions = attractionsPool.filter((x) => !usedAttractions.has(placeKey(x)));
     }
     // Filter restaurants: exclude already-used ones, prefer nearby
-    const nearbyRestaurants = near(restaurantsPool, LOCAL_RADIUS_KM);
+    const nearbyRestaurants = near(restaurantsPool, LOCAL_RADIUS_KM, usedRestaurants);
     const dayRestaurants = nearbyRestaurants.length > 0
       ? nearbyRestaurants
       : restaurantsPool.filter((x) => !usedRestaurants.has(placeKey(x)));
     // Filter nightlife: exclude already-used ones, prefer nearby
-    const nearbyNightlife = near(nightlifePool, LOCAL_RADIUS_KM);
+    const nearbyNightlife = near(nightlifePool, LOCAL_RADIUS_KM, usedNightlife);
     const dayNightlife = nearbyNightlife.length > 0
       ? nearbyNightlife
       : nightlifePool.filter((x) => !usedNightlife.has(placeKey(x)));
@@ -497,15 +634,32 @@ export function buildDaysPlan({
     const dinner = pickDistinct(dayRestaurants, usedRestaurants, 1, 'dinner spots');
     // Sunset/beach/viewpoint places are reserved for the evening slot, so the
     // morning + afternoon activities use the rest of the day's area pool.
-    const eveningPlaces = dayAttractions.filter(isEveningPick);
+    // Also filter evening places to prefer those likely open after 17:00.
+    const eveningPlaces = dayAttractions.filter((p) => isEveningPick(p) && isLikelyOpenEvening(p));
     const dayTimePool = eveningPlaces.length && eveningPlaces.length < dayAttractions.length
-      ? dayAttractions.filter((x) => !isEveningPick(x))
+      ? dayAttractions.filter((x) => !isEveningPick(x) || !isLikelyOpenEvening(x))
       : dayAttractions;
-    const morningPick = pickDistinct(dayTimePool, usedAttractions, 1, 'attractions');
-    // Afternoon uses the day-time pool when it has room, otherwise the full
+
+    // Sort day-time attractions by opening hours — places that open early
+    // (museums, galleries) go to morning; places with later opening go to afternoon.
+    const morningPool = dayTimePool.filter((p) => {
+      const bestSlot = getBestTimeSlot(p.openingHours);
+      if (bestSlot === null) return true; // No data = include in pool
+      return bestSlot <= 10; // Opens at or before 10 AM → morning
+    });
+    const afternoonPool = dayTimePool.filter((p) => {
+      const bestSlot = getBestTimeSlot(p.openingHours);
+      if (bestSlot === null) return true; // No data = include in pool
+      return bestSlot > 10; // Opens after 10 AM → afternoon
+    });
+    // Use opening-hours-aware pools if they have items, otherwise fall back
+    const effectiveMorningPool = morningPool.length > 0 ? morningPool : dayTimePool;
+    const effectiveAfternoonPool = afternoonPool.length > 0 ? afternoonPool : dayTimePool;
+    const morningPick = pickDistinct(effectiveMorningPool, usedAttractions, 1, 'attractions');
+    // Afternoon uses the afternoon-aware pool when it has room, otherwise the full
     // area pool so it never duplicates the morning pick on sparse days.
-    const afternoonPool = dayTimePool.length >= 2 ? dayTimePool : dayAttractions;
-    const afternoonPick = pickDistinct(afternoonPool, usedAttractions, 1, 'attractions');
+    const effectiveAfternoonPoolFinal = effectiveAfternoonPool.length >= 2 ? effectiveAfternoonPool : dayAttractions;
+    const afternoonPick = pickDistinct(effectiveAfternoonPoolFinal, usedAttractions, 1, 'attractions');
     const eveningPick = pickDistinct(
       eveningPlaces.length ? eveningPlaces : dayAttractions,
       usedAttractions,
@@ -848,15 +1002,37 @@ export function buildDaysPlan({
         source: 'none', isLive: false, dataStatus: 'estimate', priority: 1,
       }));
       if (origin) {
-        activities.push(placeActivity({
-          time: '11:00', slot: 'transport',
-          title: `Return travel to ${origin}`,
-          place: `${destination} → ${origin}`,
-          description: 'Return transport. Live schedules unavailable - book via your preferred provider.',
-          category: 'transport',
-          cost: { amount: returnEstimate, currency, isEstimate: true, estimateNote: 'Estimated from transport budget' },
-          source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 1,
-        }));
+        // Use real return transport data when available
+        const returnRec = returnTransportResult?.recommended;
+        if (returnRec) {
+          const returnMode = returnRec.mode || 'transport';
+          const returnModeLabel = returnMode === 'flight' ? 'Flight' : returnMode === 'train' ? 'Train' : returnMode === 'bus' ? 'Bus' : 'Transport';
+          const returnPrice = returnRec.mainTransport?.price?.amount || returnRec.totalCost || returnEstimate;
+          const returnIsLive = returnRec.isLive === true;
+          activities.push(placeActivity({
+            time: '11:00', slot: 'transport',
+            title: `${returnModeLabel} to ${origin}`,
+            place: returnRec.mainTransport?.airline
+              ? `${returnRec.mainTransport.airline} ${returnRec.mainTransport.flightNumber || ''}`.trim()
+              : returnRec.mainTransport?.trainName || returnRec.mainTransport?.operator || `${destination} → ${origin}`,
+            description: `${destination} → ${origin}. Provider: ${returnRec.source || 'live provider'}.${returnRec.recommendation ? ` ${returnRec.recommendation}` : ''}`,
+            category: returnMode,
+            cost: { amount: returnPrice, currency, isEstimate: !returnIsLive, estimateNote: returnIsLive ? 'Price from provider' : 'Estimated from transport budget' },
+            source: returnIsLive ? 'provider' : 'budget-estimate', isLive: returnIsLive, dataStatus: returnIsLive ? 'live' : 'unavailable', priority: 1,
+            travel: { distanceKm: 0, durationMin: 0, method: returnMode, isEstimate: !returnIsLive },
+          }));
+        } else {
+          // Fallback: no live return transport data
+          activities.push(placeActivity({
+            time: '11:00', slot: 'transport',
+            title: `Return travel to ${origin}`,
+            place: `${destination} → ${origin}`,
+            description: 'Return transport. Live schedules unavailable - book via your preferred provider.',
+            category: 'transport',
+            cost: { amount: returnEstimate, currency, isEstimate: true, estimateNote: 'Estimated from transport budget' },
+            source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 1,
+          }));
+        }
       }
     }
 
@@ -1080,7 +1256,7 @@ export function toCostItems(days, currency) {
   return items;
 }
 
-export default { buildDays, buildDaysPlan, clusterAreas, dateRange, computeItineraryCost, toCostItems, activityItemId, finalizeDayCosts, buildItineraryExtras, periodForTime };
+export default { buildDays, buildDaysPlan, clusterAreas, dateRange, computeItineraryCost, toCostItems, activityItemId, finalizeDayCosts, buildItineraryExtras, periodForTime, setRouteCache };
 
 /* ------------------------------------------------------------------ */
 /*  Enriched itinerary sections: trip summary, budget planning, nearby  */
@@ -1301,7 +1477,77 @@ export function buildItineraryExtras({
     optimized,
   };
 
-  /* ---- 3. Hotels (from provider, or honest estimate card) ---- */
+  /* ---- Extract real places from itinerary activities (fallback data) ---- */
+  const allActivities = (Array.isArray(days) ? days : []).flatMap((d) => d.activities || []);
+  // Extract unique hotels from itinerary activities
+  const activityHotels = [];
+  const seenHotelNames = new Set();
+  for (const a of allActivities) {
+    if (a.category === 'hotel' && a.place && !seenHotelNames.has(a.place.toLowerCase())) {
+      seenHotelNames.add(a.place.toLowerCase());
+      activityHotels.push({
+        name: a.place,
+        rating: a.rating ?? null,
+        pricePerNight: a.cost?.amount ?? null,
+        priceCurrency: a.cost?.currency || currency,
+        distanceKm: null,
+        address: a.address || '',
+        amenities: ['Free Wi-Fi', 'AC'],
+        isLive: a.isLive || false,
+        source: a.dataStatus === 'live' ? 'live-data' : 'itinerary-activity',
+      });
+    }
+  }
+  // Extract unique restaurants from itinerary activities
+  const activityRestaurants = [];
+  const seenRestaurantNames = new Set();
+  for (const a of allActivities) {
+    if (a.category === 'restaurant' && a.place && !seenRestaurantNames.has(a.place.toLowerCase())) {
+      seenRestaurantNames.add(a.place.toLowerCase());
+      activityRestaurants.push({
+        name: a.place,
+        cuisine: a.description || 'Local cuisine',
+        rating: a.rating ?? null,
+        averageCost: a.cost?.amount ?? null,
+        averageCostPerPerson: a.cost?.amount ? Math.round(a.cost.amount / partySize) : null,
+        averageCostIsEstimate: a.cost?.isEstimate !== false,
+        averageCostNote: a.cost?.isEstimate ? 'Estimated from itinerary' : 'From itinerary plan',
+        veg: Boolean(prefs?.foodPreference && /veg|jain|vegan/i.test(prefs.foodPreference)),
+        nonVeg: Boolean(prefs?.foodPreference && /non.?veg|chicken|meat|seafood/i.test(prefs.foodPreference)),
+        vegan: Boolean(prefs?.foodPreference && /vegan|jain/i.test(prefs.foodPreference)),
+        distanceKm: null,
+        distanceLabel: null,
+        address: a.address || '',
+        coordinates: a.coordinates || null,
+        isLive: a.isLive || false,
+        source: a.dataStatus === 'live' ? 'live-data' : 'itinerary-activity',
+      });
+    }
+  }
+  // Extract unique attractions from itinerary activities
+  const activityAttractions = [];
+  const seenAttractionNames = new Set();
+  for (const a of allActivities) {
+    if ((a.category === 'attraction' || a.category === 'activity') && a.place && !seenAttractionNames.has(a.place.toLowerCase())) {
+      seenAttractionNames.add(a.place.toLowerCase());
+      activityAttractions.push({
+        name: a.place,
+        rating: a.rating ?? null,
+        entryFee: { amount: a.cost?.amount || 0, currency: currency, isEstimate: a.cost?.isEstimate !== false },
+        entryFeeIsEstimate: a.cost?.isEstimate !== false,
+        entryFeeNote: a.cost?.isEstimate ? 'Estimated from itinerary' : 'From itinerary plan',
+        timeRequired: null,
+        distanceKm: null,
+        distanceLabel: null,
+        types: [a.category],
+        address: a.address || '',
+        isLive: a.isLive || false,
+        source: a.dataStatus === 'live' ? 'live-data' : 'itinerary-activity',
+      });
+    }
+  }
+
+  /* ---- 3. Hotels (from provider, or itinerary activity fallback) ---- */
   const hotelRecommended = hotelResult?.data?.recommended || null;
   const hotelList = Array.isArray(hotelResult?.data?.hotels) ? hotelResult.data.hotels.slice(0, 6) : [];
   const hotelsLive = hotelResult?.data?.isLive === true;
@@ -1333,20 +1579,28 @@ export function buildItineraryExtras({
       fetchedAt: new Date().toISOString(),
     });
   }
+  // Fallback: use hotel data extracted from itinerary activities
+  if (!hotels.length && activityHotels.length) {
+    hotels.push(...activityHotels.slice(0, 6));
+  }
 
-  /* ---- 4. Restaurants (from Geoapify Places) ---- */
+  /* ---- 4. Restaurants (from Geoapify Places, or itinerary activity fallback) ---- */
   const restaurantList = Array.isArray(restaurantResult?.data?.restaurants) ? restaurantResult.data.restaurants : [];
   const restaurantsLive = restaurantResult?.data?.isLive === true;
   const restaurants = restaurantList.slice(0, 8).map((r) => {
     const level = r.priceLevel ?? 1;
+    const hasZomato = r.zomatoData && r.zomatoData.averageCostPerPerson > 0;
     return {
       name: r.name || 'Restaurant',
-      cuisine: (r.types || []).filter((t) => t && t !== 'restaurant').slice(0, 3).join(', ') || 'Local cuisine',
+      cuisine: (r.cuisines?.length ? r.cuisines : (r.types || []).filter((t) => t && t !== 'restaurant')).slice(0, 3).join(', ') || 'Local cuisine',
       rating: r.rating ?? null,
-      averageCost: RESTAURANT_PRICE_BY_LEVEL[level] ?? 350,
-      averageCostPerPerson: Math.round(RESTAURANT_PRICE_BY_LEVEL[level] ?? 350),
-      averageCostIsEstimate: true,
-      averageCostNote: 'Estimated from Geoapify priceLevel — actual menu prices not available from provider',
+      reviewCount: r.reviewCount || r.zomatoData?.votes || null,
+      averageCost: hasZomato ? r.averageCostForTwo : (RESTAURANT_PRICE_BY_LEVEL[level] ?? 350),
+      averageCostPerPerson: hasZomato ? r.averageCostPerPerson : Math.round(RESTAURANT_PRICE_BY_LEVEL[level] ?? 350),
+      averageCostIsEstimate: !hasZomato,
+      averageCostNote: hasZomato
+        ? `Real average from Zomato (${r.zomatoData.ratingText || 'rated'} ${r.zomatoData.rating ?? ''})`
+        : 'Estimated from Geoapify priceLevel — actual menu prices not available from provider',
       veg: Boolean(prefs?.foodPreference && /veg|jain|vegan/i.test(prefs.foodPreference)),
       nonVeg: Boolean(prefs?.foodPreference && /non.?veg|chicken|meat|seafood/i.test(prefs.foodPreference)),
       vegan: Boolean(prefs?.foodPreference && /vegan|jain/i.test(prefs.foodPreference)),
@@ -1356,36 +1610,43 @@ export function buildItineraryExtras({
       address: r.address || '',
       coordinates: r.coordinates || null,
       isLive: restaurantsLive,
-      source: 'geoapify',
+      source: hasZomato ? 'zomato' : 'geoapify',
     };
   });
+  // Fallback: use restaurant data extracted from itinerary activities
+  if (!restaurants.length && activityRestaurants.length) {
+    restaurants.push(...activityRestaurants.slice(0, 8));
+  }
 
-  /* ---- 5. Attractions (top, hidden gems, nearby) ---- */
+  /* ---- 5. Attractions (top, hidden gems, nearby, or itinerary activity fallback) ---- */
   const attractionList = Array.isArray(attractionResult?.data?.attractions) ? attractionResult.data.attractions : [];
   const attractionsLive = attractionResult?.data?.isLive === true;
+  // Use activity-extracted attractions as fallback when provider data is empty
+  const effectiveAttractionList = attractionList.length ? attractionList : activityAttractions;
+  const effectiveAttractionsLive = attractionsLive || activityAttractions.some((a) => a.isLive);
   const hiddenGems =
     (Array.isArray(guideResult?.data?.hiddenGems) && guideResult.data.hiddenGems.length
       ? guideResult.data.hiddenGems
-      : attractionList.slice(-3)
+      : effectiveAttractionList.slice(-3)
     ) || [];
   const attractionKm = (a) => a.distanceKm ?? (a.distanceMeters != null ? Math.round((a.distanceMeters / 1000) * 10) / 10 : null);
   const attractionCard = (a, i) => ({
     name: a.name || `Attraction ${i + 1}`,
     rating: a.rating ?? null,
-    entryFee: entryFeeEstimate(a, currency),
-    entryFeeIsEstimate: true,
-    entryFeeNote: 'Estimated — no live entry fee pricing available from Geoapify provider',
+    entryFee: (a.entryFee && typeof a.entryFee.amount === 'number') ? a.entryFee : entryFeeEstimate(a, currency),
+    entryFeeIsEstimate: a.entryFee ? (a.entryFee.isEstimate !== false) : true,
+    entryFeeNote: a.entryFeeNote || (a.entryFee ? 'From itinerary plan' : 'Estimated — no live entry fee pricing available from Geoapify provider'),
     openingHours: a.openingHours || null,
-    timeRequired: visitHoursEstimate(a),
+    timeRequired: a.timeRequired || visitHoursEstimate(a),
     distanceKm: attractionKm(a),
     distanceLabel: distanceLabel(attractionKm(a)),
     types: (a.types || []).slice(0, 3),
     address: a.address || '',
-    isLive: attractionsLive,
-    source: 'geoapify',
+    isLive: a.isLive || attractionsLive,
+    source: a.source || 'geoapify',
   });
-  const topAttractions = attractionList.slice(0, 6).map(attractionCard);
-  const nearbyAttractions = attractionList.slice(0, 10).map(attractionCard);
+  const topAttractions = effectiveAttractionList.slice(0, 6).map(attractionCard);
+  const nearbyAttractions = effectiveAttractionList.slice(0, 10).map(attractionCard);
   const hiddenGemsCards = hiddenGems
     .map((g) => (typeof g === 'string' ? { name: g, rating: null, entryFee: { amount: 0, currency, isEstimate: true }, timeRequired: null, isLive: false } : attractionCard(g, 0)))
     .slice(0, 4);
@@ -1535,17 +1796,34 @@ export function buildItineraryExtras({
     thingsToAvoid: ["Avoid unregistered touts and 'one-day-only' deals", 'Do not carry large cash amounts', 'Respect local dress codes at religious sites'],
   };
 
-  /* ---- 9. AI recommendations (derived from real place lists) ---- */
+  /* ---- 9. AI recommendations (derived from real place lists + itinerary activities) ---- */
   const byRating = (arr) => [...arr].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
-  const cafePicks = byRating(restaurants).filter((r) => /cafe|café|coffee/i.test(r.cuisine)).slice(0, 3).map((r) => r.name);
+  const cafePicks = byRating(restaurants).filter((r) => /cafe|café|coffee/i.test(r.cuisine || r.description || '')).slice(0, 3).map((r) => r.name);
   const familyPicks = topAttractions.filter((a) => !a.entryFee?.amount || a.entryFee.amount <= 100).slice(0, 3).map((a) => a.name);
+  // Build destination-specific recommendations from all available data
+  const activityCategories = allActivities.reduce((acc, a) => {
+    if (!acc.includes(a.category) && a.place) acc.push(a.category);
+    return acc;
+  }, []);
+  const dayThemes = (Array.isArray(days) ? days : []).map((d) => d.theme).filter(Boolean);
   const recommendations = {
     mustVisitPlaces: topAttractions.slice(0, 5).map((a) => a.name),
     bestRestaurants: byRating(restaurants).slice(0, 4).map((r) => r.name),
     bestCafes: cafePicks.length ? cafePicks : byRating(restaurants).slice(0, 2).map((r) => r.name),
-    bestShoppingAreas: (Array.isArray(guide.shoppingAreas) && guide.shoppingAreas.length ? guide.shoppingAreas : ['Local market / bazaar', 'Main market street']).slice(0, 3),
+    bestShoppingAreas: (Array.isArray(guide.shoppingAreas) && guide.shoppingAreas.length ? guide.shoppingAreas : [
+      `${destination} local market / bazaar`,
+      `${destination} main market street`,
+    ]).slice(0, 3),
     familyFriendlyAttractions: familyPicks.length ? familyPicks : topAttractions.slice(0, 2).map((a) => a.name),
-    hiddenGems: hiddenGemsCards.map((g) => g.name),
+    hiddenGems: hiddenGemsCards.length ? hiddenGemsCards.map((g) => g.name) : [
+      `Explore ${destination} old city areas for authentic local architecture and food`,
+      `Take a morning walk in any local park in ${destination} to see local life`,
+      `Check for free walking tours led by local volunteers in ${destination}`,
+      `Visit popular attractions in ${destination} early morning to avoid crowds`,
+    ],
+    // Add day themes and activities to recommendations for richer content
+    ...(dayThemes.length ? { dayHighlights: dayThemes.slice(0, 4) } : {}),
+    ...(activityCategories.length ? { activityTypes: activityCategories.filter((c) => !['transport', 'hotel'].includes(c)).slice(0, 4) } : {}),
   };
 
   /* ---- 10. Map data (markers + daily routes from activity coordinates) ---- */

@@ -59,6 +59,14 @@ const env = {
   PAY2ALL_API_KEY: process.env.PAY2ALL_API_KEY || '',
   PAY2ALL_BASE_URL: process.env.PAY2ALL_BASE_URL || 'https://pay2all.in/api/v1',
 
+  VIATOR_API_KEY: process.env.VIATOR_API_KEY || '',
+  VIATOR_AFFILIATE_ID: process.env.VIATOR_AFFILIATE_ID || '',
+
+  ZOMATO_RAPIDAPI_KEY: process.env.ZOMATO_RAPIDAPI_KEY || '',
+  ZOMATO_RAPIDAPI_HOST: process.env.ZOMATO_RAPIDAPI_HOST || 'zomato4.p.rapidapi.com',
+
+  TICKETMASTER_API_KEY: process.env.TICKETMASTER_API_KEY || '',
+
   UNSPLASH_ACCESS_KEY: process.env.UNSPLASH_ACCESS_KEY || '',
 
   SMTP_HOST: process.env.SMTP_HOST || '',

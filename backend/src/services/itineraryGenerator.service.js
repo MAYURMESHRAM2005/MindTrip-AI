@@ -419,6 +419,7 @@ function buildContext(data) {
     traffic = {},
     guide = {},
     safety = {},
+    events = null,
     budgetAllocation = {},
     totalEstimatedCost = 0,
     isOverBudget = false,
@@ -468,14 +469,23 @@ function buildContext(data) {
     attractions: (attractions || []).slice(0, 12).map((a) => ({
       name: a.name || '', placeId: a.placeId || '', type: (a.types || []).join(', '), address: a.address || '',
       rating: a.rating, priceLevel: a.priceLevel, coordinates: a.coordinates,
-      distanceMeters: a.distanceMeters, source: 'geoapify',
-      note: 'Entry fees are estimates — no live pricing from provider',
+      distanceMeters: a.distanceMeters, source: a.entryFee?.source || 'geoapify',
+      entryFee: a.entryFee || null,
+      viatorPricing: a.viatorPricing || null,
+      note: a.entryFee ? `Real entry fee from Viator: ${a.entryFee.currency} ${a.entryFee.amount}` : 'Entry fees are estimates — no live pricing from provider',
     })),
     restaurants: (restaurants || []).slice(0, 10).map((r) => ({
       name: r.name || '', placeId: r.placeId || '', type: (r.types || []).join(', '), address: r.address || '',
       rating: r.rating, priceLevel: r.priceLevel, coordinates: r.coordinates,
-      source: 'geoapify',
-      note: 'Menu prices not available — costs are estimates based on priceLevel',
+      source: r.zomatoData ? 'zomato' : 'geoapify',
+      averageCostPerPerson: r.averageCostPerPerson || r.zomatoData?.averageCostPerPerson || null,
+      averageCostForTwo: r.averageCostForTwo || r.zomatoData?.averageCostForTwo || null,
+      zomatoRating: r.zomatoData?.rating || null,
+      zomatoVotes: r.zomatoData?.votes || null,
+      cuisines: r.cuisines || r.zomatoData?.cuisines || null,
+      note: r.zomatoData
+        ? `Real average meal cost from Zomato: ${r.zomatoData.averageCostPerPerson}/person (${r.zomatoData.ratingText || 'rated'} ${r.zomatoData.rating ?? ''})`
+        : 'Menu prices not available — costs are estimates based on priceLevel',
     })),
     nightlife: (nightlife || []).slice(0, 8).map((n) => ({
       name: n.name || '', placeId: n.placeId || '', type: (n.types || []).join(', '), address: n.address || '',
@@ -487,6 +497,7 @@ function buildContext(data) {
       suggestions: traffic.suggestions || [],
       riskyLegs: traffic.riskyLegs || [],
     },
+    events: normalizeEvents(events),
     guide: {
       localTips: (guide.localTips || []).slice(0, 6),
       etiquette: (guide.etiquette || []).slice(0, 4),
@@ -560,6 +571,34 @@ function normalizeTransport(transport) {
       arrival: o.arriveAt || o.arrival || '',
       price: o.price, duration: o.duration,
     })),
+  };
+}
+
+function normalizeEvents(events) {
+  if (!events || !events.events?.length) {
+    return { available: false, totalEvents: 0, message: 'No cultural events found for trip dates' };
+  }
+  return {
+    available: true,
+    totalEvents: events.totalEvents || events.events.length,
+    daysWithEvents: events.daysWithEvents || 0,
+    categories: events.categories || [],
+    events: (events.events || []).slice(0, 15).map((e) => ({
+      name: e.name || '',
+      date: e.date || '',
+      time: e.time || '',
+      venue: e.venueName || '',
+      address: e.venueAddress || '',
+      city: e.venueCity || '',
+      category: e.category || '',
+      genre: e.genre || '',
+      priceRange: e.priceRange || null,
+      isFree: e.isFree || false,
+      url: e.url || '',
+      imageUrl: e.imageUrl || '',
+    })),
+    daysMap: events.daysMap || {},
+    note: events.note || `Found ${events.totalEvents} real events from Ticketmaster`,
   };
 }
 
@@ -742,6 +781,12 @@ function enforceDataIntegrity(itinerary, context) {
   const hasLiveTransport = context.transport?.available && context.transport?.isLive;
   const now = new Date().toISOString();
 
+  // ═══ Cross-day uniqueness enforcement ═══
+  // Track used attraction and restaurant names across all days.
+  // If Gemini introduced duplicates, mark the later ones as unavailable.
+  const usedAttractionNames = new Set();
+  const usedRestaurantNames = new Set();
+
   for (const day of itinerary.days || []) {
     if (!hasLiveWeather && day.weather) {
       day.weather = {
@@ -764,6 +809,17 @@ function enforceDataIntegrity(itinerary, context) {
           activity.isLive = false;
           activity.description = `${activity.description || 'Restaurant'} (unverified — not in live data)`;
         }
+        // Cross-day restaurant deduplication
+        if (name && activity.dataStatus !== 'unavailable') {
+          if (usedRestaurantNames.has(name)) {
+            // Duplicate restaurant across days — mark as unavailable
+            activity.dataStatus = 'unavailable';
+            activity.isLive = false;
+            activity.description = `${activity.description || 'Restaurant'} (removed — duplicate across days)`;
+          } else {
+            usedRestaurantNames.add(name);
+          }
+        }
         // Restaurant costs from Geoapify are ALWAYS estimates (no real menu prices)
         if (activity.cost) {
           activity.cost.isEstimate = true;
@@ -783,11 +839,32 @@ function enforceDataIntegrity(itinerary, context) {
             activity.description = `${activity.description || 'Activity'} (unverified — not in live data)`;
           }
         }
-        // Attraction entry fees are ALWAYS estimates (no live pricing from Geoapify)
+        // Cross-day attraction deduplication
+        if (name && activity.dataStatus !== 'unavailable') {
+          const isGeneric = /^(explore|visit|see|enjoy|discover|free time|leisure)/i.test(name);
+          if (!isGeneric) {
+            if (usedAttractionNames.has(name)) {
+              // Duplicate attraction across days — mark as unavailable
+              activity.dataStatus = 'unavailable';
+              activity.isLive = false;
+              activity.description = `${activity.description || 'Activity'} (removed — duplicate across days)`;
+            } else {
+              usedAttractionNames.add(name);
+            }
+          }
+        }
+        // Attraction entry fees: preserve Viator real pricing, mark others as estimates
         if (activity.cost) {
-          activity.cost.isEstimate = true;
-          if (!activity.cost.estimateNote) {
-            activity.cost.estimateNote = 'Estimated entry fee — no live pricing available from provider';
+          if (activity.cost.source === 'viator') {
+            // Viator provides real pricing — keep isEstimate = false
+            activity.dataStatus = 'live';
+            activity.isLive = true;
+          } else if (!activity.cost.isEstimate) {
+            // Cost was not from Viator and not marked as estimate — force estimate
+            activity.cost.isEstimate = true;
+            if (!activity.cost.estimateNote) {
+              activity.cost.estimateNote = 'Estimated entry fee — no live pricing available from provider';
+            }
           }
         }
       }
@@ -859,31 +936,61 @@ function countActivities(itinerary) {
 
 /** System prompt — instructs Gemini to ONLY use provided data. */
 function buildSystemPrompt() {
-  return `You are TravelMind AI's Itinerary Generator. You are the final itinerary planner for TravelMind AI. Your task is to create a personalized day-wise travel itinerary using ONLY the verified travel data provided in the input JSON.
+  return `You are TravelMind AI's Itinerary Generator. You create a personalized day-wise travel itinerary using ONLY the verified travel data provided in the input JSON.
 
-STRICT RULES:
-1. Never invent or hallucinate flights, trains, buses, hotels, restaurants, prices, timings, routes, availability, weather or distances.
-2. Use only the supplied API data.
-3. If information is missing, return "Not available" instead of guessing.
-4. Respect the user's total budget.
-5. Respect travel dates and number of travelers.
-6. Consider the user's preferences.
-7. Use realistic travel times from the provided route data.
-8. Avoid scheduling two activities at the same time.
-9. Avoid unnecessary backtracking between locations.
-10. Prefer nearby places when creating the daily schedule.
-11. Use actual prices from the supplied data for cost calculations.
-12. Do not modify API-provided prices.
-13. Do not claim availability unless it exists in the provided data.
-14. Create a practical day-wise itinerary.
-15. Return ONLY valid JSON matching the required schema.
-16. Travel tips and cultural advice can use general knowledge, but always note when it is general advice vs live data.
-17. For multi-day trips, assign different geographic areas to different days when real data allows.
-18. Every activity must have a cost entry — use provided prices for live data or mark as estimated.
-19. Arrival day: start with transport + check-in. Departure day: check-out + return transport.
-20. Include breakfast, lunch, dinner, morning activity, afternoon activity, evening activity, and night activity for each day.
+═══ CRITICAL ANTI-HALLUCINATION RULES ═══
+You are STRICTLY FORBIDDEN from inventing ANY of the following:
+- Hotel names, prices, or availability
+- Restaurant names, menu items, or prices
+- Attraction names, entry fees, or opening hours
+- Flight numbers, airline names, departure/arrival times, or prices
+- Train numbers, train names, or ticket prices
+- Bus operator names or ticket prices
+- Airport names or IATA codes
+- Weather conditions or temperatures
+- Distances or travel durations
+- Any price, cost, or monetary value
+- Any schedule, timetable, or timing
+- Any availability, booking status, or reservation
 
-OUTPUT FORMAT:
+If the provided data does not contain information for a required field, use:
+- "Not available" for missing text fields
+- 0 with isEstimate: true for missing prices
+- null for missing coordinates
+
+═══ WHAT YOU ARE ALLOWED TO DO ═══
+1. ORGANIZE the provided data into a day-by-day schedule
+2. RANK and SELECT from the provided options (best hotel, best restaurants, etc.)
+3. ASSIGN geographic areas to days based on coordinate proximity
+4. CREATE descriptions and summaries using the provided data
+5. CALCULATE daily costs using provided prices (never invent prices)
+6. GENERATE travel tips using general knowledge (always note: "General advice — verify locally")
+7. SUGGEST meal times and activity sequences
+8. PROVIDE cultural context for the destination
+9. SCHEDULE real cultural events on their specific dates (from EVENT DATA) — these are confirmed events, not invented
+
+═══ STRUCTURAL RULES ═══
+- Every attraction must appear on ONLY ONE day (no repeats across days)
+- Hotels CAN repeat across days (same hotel for multi-night stay)
+- Restaurants should NOT repeat across days when enough options exist
+- Every day must have: breakfast, morning activity, lunch, afternoon activity, evening activity, dinner
+- Arrival day: start with transport + check-in
+- Departure day: check-out + return transport (no sightseeing)
+- Never schedule two activities at the same time
+- Never schedule an attraction after 20:00 (most close by then)
+- Every activity must have a cost entry with isEstimate flag
+- Use provided coordinates for all places — never invent coordinates
+
+═══ COST RULES ═══
+- Use EXACT prices from the provided data when available
+- For attractions: use entryFee from Viator when provided (isEstimate: false) — these are REAL prices
+- For restaurants: use averageCostPerPerson from Zomato when provided (isEstimate: false) — these are REAL data
+- For restaurants without Zomato data: use priceLevel-based estimates (always mark isEstimate: true)
+- For transport: use provided prices or mark as estimate
+- NEVER change an API-provided price
+- Total daily cost must equal sum of activity costs
+
+═══ OUTPUT FORMAT ═══
 Return a JSON object with this exact structure:
 {
   "itinerary": {
@@ -938,44 +1045,56 @@ Return a JSON object with this exact structure:
 /** Build the user prompt with the complete context. */
 function buildUserPrompt(context, rawData) {
   // Build a data-source summary so Gemini knows which items are real vs estimated
+  const viatorEnrichedCount = (rawData.attractions || []).filter((a) => a.entryFee?.source === 'viator').length;
+  const zomatoEnrichedCount = (rawData.restaurants || []).filter((r) => r.zomatoData && r.zomatoData.averageCostPerPerson > 0).length;
   const dataSourceSummary = {
     weatherSource: rawData.weather?.data?.provider || 'unavailable',
     hotelSource: rawData.accommodation?.data?.source || 'unavailable',
     hotelIsLive: rawData.accommodation?.data?.isLive || false,
     flightSource: rawData.transport?.data?.isLive ? (rawData.transport?.data?.selected?.provider || 'live') : 'unavailable',
     attractionCount: (rawData.attractions || []).length,
-    attractionSource: 'geoapify',
+    attractionSource: viatorEnrichedCount > 0 ? `viator+geoapify (${viatorEnrichedCount} with real pricing)` : 'geoapify',
     restaurantCount: (rawData.restaurants || []).length,
-    restaurantSource: 'geoapify',
+    restaurantSource: zomatoEnrichedCount > 0 ? `zomato+geoapify (${zomatoEnrichedCount} with real pricing)` : 'geoapify',
     nightlifeCount: (rawData.nightlife || []).length,
-    note: 'All prices from Geoapify are estimates based on priceLevel. Actual menu prices and entry fees are NOT available from this provider.',
+    note: [
+      viatorEnrichedCount > 0 ? `Attraction entry fees from Viator are REAL prices.` : '',
+      zomatoEnrichedCount > 0 ? `Restaurant average costs from Zomato are REAL data. Use averageCostPerPerson for meal pricing.` : '',
+      viatorEnrichedCount === 0 && zomatoEnrichedCount === 0 ? 'All prices from Geoapify are estimates based on priceLevel. Actual menu prices and entry fees are NOT available from this provider.' : '',
+    ].filter(Boolean).join(' '),
   };
 
-  return `You are the final itinerary planner for TravelMind AI. Your task is to create a personalized day-wise travel itinerary using ONLY the verified travel data provided below.
+  return `You are the final itinerary planner for TravelMind AI. Create a personalized day-wise travel itinerary using ONLY the verified travel data provided below.
 
-STRICT RULES:
-- Never invent or hallucinate flights, trains, buses, hotels, restaurants, prices, timings, routes, availability, weather or distances.
-- Use only the supplied API data.
-- If information is missing, return "Not available" instead of guessing.
-- Respect the user's total budget of ${context.budget.totalBudget} ${context.budget.currency}.
-- Respect travel dates and number of travelers.
-- Consider the user's preferences.
-- Use realistic travel times from the provided route data.
-- Avoid scheduling two activities at the same time.
-- Avoid unnecessary backtracking between locations.
-- Prefer nearby places when creating the daily schedule.
-- Use actual prices from the supplied data for cost calculations.
-- Do not modify API-provided prices.
-- Do not claim availability unless it exists in the provided data.
-- Create a practical day-wise itinerary.
-- Return ONLY valid JSON matching the required schema.
-- Every attraction must appear on ONLY ONE day (no repeats across days).
-- Hotels can repeat across days (same hotel for multi-night stay).
-- Restaurants should not repeat across days when possible.
-- For each activity, include "fetchedAt" timestamp and "source" field.
-- Restaurant prices are ESTIMATES based on Geoapify priceLevel — mark isEstimate=true.
-- Attraction entry fees are ESTIMATES — mark isEstimate=true.
-- Transport prices come from the provider when available.
+═══ CRITICAL: YOU MUST NOT INVENT ANY DATA ═══
+The following items MUST come EXACTLY from the provided data. If not in the data, use "Not available":
+- Hotel names → use ONLY from HOTEL DATA section
+- Restaurant names → use ONLY from RESTAURANT DATA section
+- Attraction names → use ONLY from PLACES DATA section
+- Flight details → use ONLY from TRANSPORT DATA section
+- Prices → use ONLY from provided data; if missing, use 0 with isEstimate=true
+- Weather → use ONLY from WEATHER DATA section
+- Distances/times → use ONLY from ROUTE DATA or provided coordinates
+
+═══ STRUCTURAL RULES ═══
+- Every attraction appears on ONLY ONE day — check placeId to prevent duplicates
+- Hotels CAN repeat (same hotel for multi-night stay)
+- Restaurants should NOT repeat when enough options exist
+- Budget limit: ${context.budget.totalBudget} ${context.budget.currency}
+- Each day needs: breakfast, morning, lunch, afternoon, evening, dinner, night
+- Arrival day: transport + check-in first
+- Departure day: check-out + return transport only
+- No overlapping activities
+- No attractions scheduled after 20:00
+
+═══ COST RULES ═══
+- Use exact prices from provided data
+- Attraction entry fees with source='viator' are REAL prices (isEstimate: false) — use them as-is
+- Restaurant costs with source='zomato' are REAL data (isEstimate: false) — use averageCostPerPerson for meal pricing
+- Geoapify restaurant costs without Zomato data are ESTIMATES (mark isEstimate=true)
+- Transport prices come from provider when available
+- Total daily cost = sum of activity costs
+- Never modify an API-provided price
 
 DATA SOURCE TRANSPARENCY:
 ${JSON.stringify(dataSourceSummary, null, 2)}
@@ -1014,6 +1133,9 @@ ${JSON.stringify(context.guide, null, 2)}
 
 SAFETY DATA:
 ${JSON.stringify(context.safety, null, 2)}
+
+EVENT DATA (real events from Ticketmaster — schedule on their specific dates):
+${JSON.stringify(context.events, null, 2)}
 
 ${context.existingPlan ? `EXISTING DETERMINISTIC PLAN (use as reference, do not override):\n${JSON.stringify(context.existingPlan, null, 2)}` : ''}
 
