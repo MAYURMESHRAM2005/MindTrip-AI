@@ -698,7 +698,6 @@ export const DICT = {
   'Providers': { en: 'Providers', hi: 'प्रदाता', mr: 'प्रदाते' },
   'Errors': { en: 'Errors', hi: 'त्रुटियां', mr: 'त्रुटी' },
   'AI calls': { en: 'AI calls', hi: 'एआई कॉल', mr: 'एआय कॉल्स' },
-  'Total expenses': { en: 'Total expenses', hi: 'कुल खर्च', mr: 'एकूण खर्च' },
   'New signups (last 60 days)': { en: 'New signups (last 60 days)', hi: 'नए पंजीकरण (पिछले 60 दिन)', mr: 'नवीन नोंदणी (मागील 60 दिवस)' },
   'No signup data yet.': { en: 'No signup data yet.', hi: 'अभी कोई पंजीकरण डेटा नहीं।', mr: 'अजून नोंदणी डेटा नाही.' },
   'Top destinations': { en: 'Top destinations', hi: 'शीर्ष गंतव्य', mr: 'शीर्ष गंतव्यस्थाने' },

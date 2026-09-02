@@ -28,6 +28,25 @@ export const generateTripSchema = Joi.object({
   activityLevel: Joi.string().valid('relaxed', 'moderate', 'active').default('moderate'),
   accessibility: Joi.array().items(Joi.string().trim().max(60)).default([]),
   title: Joi.string().trim().max(160).allow(''),
+}).custom((obj, helpers) => {
+  // Cross-field: endDate must not be before startDate
+  if (obj.startDate && obj.endDate) {
+    const start = new Date(obj.startDate);
+    const end = new Date(obj.endDate);
+    if (end < start) {
+      return helpers.error('any.invalid', { message: 'End date must not be before start date' });
+    }
+  }
+  // Cross-field: at least one traveler
+  const totalTravelers = (obj.adults || 0) + (obj.children || 0);
+  if (totalTravelers < 1) {
+    return helpers.error('any.invalid', { message: 'At least one traveler (adult or child) is required' });
+  }
+  // Cross-field: destination required unless suggestDestination is true
+  if (!obj.suggestDestination && (!obj.destination || !obj.destination.trim())) {
+    return helpers.error('any.invalid', { message: 'Destination is required unless suggestDestination is true' });
+  }
+  return obj;
 });
 
 export const updateTripSchema = Joi.object({
