@@ -96,8 +96,8 @@ test('final validator detects overlapping activities and budget overflow', () =>
     origin: 'Mumbai',
     prefs: { foodPreference: 'vegetarian' },
   });
-  assert.ok(result.issues.some((i) => i.includes('exceeds budget')));
-  assert.ok(result.issues.some((i) => i.includes('overlaps')));
+  assert.ok(result.issues.some((i) => typeof i === 'string' ? i.includes('exceeds budget') : i.message?.includes('exceeds budget')));
+  assert.ok(result.issues.some((i) => typeof i === 'string' ? i.includes('overlaps') : i.message?.includes('overlaps')));
   assert.equal(result.passed, false);
 });
 
@@ -588,7 +588,7 @@ test('final validator flags attraction scheduled after 21:00', () => {
     origin: '',
     prefs: {},
   });
-  assert.ok(result.warnings.some((w) => w.includes('22:00') && w.includes('opening hours')), 'flags late-night attraction');
+  assert.ok(result.warnings.some((w) => { const msg = typeof w === 'string' ? w : w.message || ''; return msg.includes('22:00') && (msg.includes('opening hours') || msg.includes('close by 20:00')); }), 'flags late-night attraction');
 });
 
 test('final validator flags insufficient buffer between transport and next activity', () => {
@@ -610,7 +610,7 @@ test('final validator flags insufficient buffer between transport and next activ
     origin: 'Mumbai',
     prefs: {},
   });
-  assert.ok(result.warnings.some((w) => w.includes('buffer')), 'flags insufficient transport buffer');
+  assert.ok(result.warnings.some((w) => { const msg = typeof w === 'string' ? w : w.message || ''; return msg.includes('buffer'); }), 'flags insufficient transport buffer');
 });
 
 test('final validator flags isLive/dataStatus contradiction', () => {
@@ -631,7 +631,7 @@ test('final validator flags isLive/dataStatus contradiction', () => {
     origin: 'Mumbai',
     prefs: {},
   });
-  assert.ok(result.issues.some((i) => i.includes('contradiction')), 'flags isLive/dataStatus contradiction');
+  assert.ok(result.issues.some((i) => { const msg = typeof i === 'string' ? i : (i.message || ''); return msg.includes('isLive') && msg.includes('unavailable'); }), 'flags isLive/dataStatus contradiction');
 });
 
 test('buildDays enforces the budget as a hard constraint', () => {

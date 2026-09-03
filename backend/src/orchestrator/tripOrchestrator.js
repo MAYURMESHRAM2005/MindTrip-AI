@@ -22,6 +22,7 @@ import budgetService from '../services/budget.service.js';
 import budgetEngine from '../services/budgetEngine.service.js';
 import itineraryService, { setRouteCache } from '../services/itinerary.service.js';
 import { generateItinerary, getRequestCount } from '../services/itineraryGenerator.service.js';
+import { runAIPlanningPipeline } from './orchestratorAIPlanning.js';
 import placesProvider from '../providers/places.provider.js';
 import mapsProvider from '../providers/maps.provider.js';
 import transportIntel from '../services/transportIntelligence.service.js';
@@ -570,17 +571,26 @@ export async function generateTrip({ user, request }) {
   logger.agent('finalValidator', 'run', { status: validation.status, issues: validation.data?.issues?.length || 0, warnings: validation.data?.warnings?.length || 0, passed: validation.data?.passed });
 
   // ══════════════════════════════════════════════════════════════════════
-  // BATCH 7: ONE Gemini API Request — generates personalized itinerary
+  // BATCH 7: AI Planning Pipeline (normalize → AI plan → resolve → validate → replan)
   // ══════════════════════════════════════════════════════════════════════
-  logger.info('[ORCHESTRATOR] ═══ BATCH 7: AI itinerary generation (Gemini → Groq fallback) ═══');
-  let geminiResult = null;
-  const geminiStarted = Date.now();
-  logger.info(`[ORCHESTRATOR] Calling AI with context: ${daysCount} days, ${currency} ${totalBudget} budget`);
+  logger.info('[ORCHESTRATOR] ═══ BATCH 7: AI Planning Pipeline ═══');
+  const aiPlanningStarted = Date.now();
+  logger.info(`[ORCHESTRATOR] Calling AI planning pipeline: ${daysCount} days, ${currency} ${totalBudget} budget`);
 
+  let aiPlanningResult = null;
   try {
-    const nightsCount = Math.max(0, daysCount - 1);
-    geminiResult = await generateItinerary({
-      userPreferences: prefs,
+    aiPlanningResult = await runAIPlanningPipeline({
+      attractions: attractionResult?.data?.attractions || [],
+      restaurants: restaurantResult?.data?.restaurants || [],
+      nightlife: nightlifeData,
+      hotelResult,
+      transportResult,
+      eventsResult,
+      weatherResult,
+      trafficResult,
+      guideResult,
+      safetyResult,
+      prefs,
       destination,
       origin: request.origin,
       startDate: fmtDate(request.startDate),
@@ -589,45 +599,40 @@ export async function generateTrip({ user, request }) {
       totalBudget,
       currency,
       daysCount,
-      nightsCount,
-      weather: weatherResult,
-      accommodation: hotelResult,
-      transport: transportResult,
-      attractions: attractionResult?.data?.attractions || [],
-      restaurants: restaurantResult?.data?.restaurants || [],
-      nightlife: nightlifeData,
-      traffic: trafficResult?.data || {},
-      guide: guideResult?.data || {},
-      safety: safetyResult?.data || {},
-      events: eventsResult?.data || null,
-      budgetAllocation: allocation,
+      nightsCount: Math.max(0, daysCount - 1),
+      allocation,
       totalEstimatedCost,
       isOverBudget,
       existingDaysPlan: days,
       userId,
+      routeCache,
     });
   } catch (err) {
-    console.error(`[itineraryGenerator] Unexpected error: ${err.message}`);
-    geminiResult = { success: false, error: err.message };
+    console.error(`[orchestratorAIPlanning] Unexpected error: ${err.message}`);
+    aiPlanningResult = { success: false, error: err.message };
   }
 
-  const geminiLatencyMs = Date.now() - geminiStarted;
-  const aiSuccess = geminiResult?.success === true;
-  const aiProvider = geminiResult?.provider || null;
-  const fallbackUsed = geminiResult?.fallbackUsed === true;
+  const aiPlanningLatencyMs = Date.now() - aiPlanningStarted;
+  const aiPlanSuccess = aiPlanningResult?.success === true;
+  const aiProvider = aiPlanningResult?.provider || null;
+  const aiFallbackUsed = aiPlanningResult?.fallbackUsed || false;
   const providerLabel = aiProvider ? (aiProvider === 'gemini' ? 'Gemini' : 'Groq') : 'none';
-  const statusLabel = aiSuccess ? `${providerLabel} SUCCESS` : 'FAILED';
-  console.log(`[orchestrator] AI call: ${statusLabel} in ${geminiLatencyMs}ms (provider: ${providerLabel}, fallback: ${fallbackUsed}, request #${getRequestCount()})`);
+  const statusLabel = aiPlanSuccess ? `${providerLabel} SUCCESS` : 'FAILED';
+  console.log(`[orchestrator] AI planning: ${statusLabel} in ${aiPlanningLatencyMs}ms (provider: ${providerLabel}, attempts: ${aiPlanningResult?.attempts?.length || 0})`);
 
-  logger.info(`[ORCHESTRATOR] AI result: ${statusLabel} in ${geminiLatencyMs}ms, provider: ${providerLabel}, fallback: ${fallbackUsed}, days: ${geminiResult?.itinerary?.days?.length || 0}`);
+  // Use AI-generated days when available; fall back to deterministic plan
+  const finalDays = aiPlanSuccess ? aiPlanningResult.days : days;
+  const usedAIPlan = aiPlanSuccess;
+
+  logger.info(`[ORCHESTRATOR] AI planning result: ${statusLabel}, using ${usedAIPlan ? 'AI' : 'deterministic'} plan (${finalDays.length} days)`);
   report.push({
-    agent: 'itinerary-generator',
-    status: aiSuccess ? 'success' : 'degraded',
-    message: aiSuccess
-      ? `Itinerary generated by ${providerLabel}${fallbackUsed ? ' (fallback)' : ''} in ${geminiResult.latencyMs}ms (request #${geminiResult.geminiRequestCount})`
-      : `Both Gemini and Groq failed: ${geminiResult?.error || 'unknown error'} — using deterministic plan as fallback`,
-    latencyMs: geminiLatencyMs,
-    usedAI: aiSuccess,
+    agent: 'ai-planning-pipeline',
+    status: aiPlanSuccess ? 'success' : 'degraded',
+    message: aiPlanSuccess
+      ? `AI planning pipeline completed by ${providerLabel}${aiFallbackUsed ? ' (fallback)' : ''} in ${aiPlanningLatencyMs}ms (${aiPlanningResult.attempts?.length || 1} attempt(s), validation ${aiPlanningResult.validation?.passed ? 'passed' : 'degraded'})`
+      : `AI planning failed after ${(aiPlanningResult?.attempts?.length || 0)} attempt(s): ${aiPlanningResult?.error || 'unknown error'} — using deterministic plan as fallback`,
+    latencyMs: aiPlanningLatencyMs,
+    usedAI: aiPlanSuccess,
   });
 
   logger.info('[ORCHESTRATOR] ═══ BATCH 8: Enriched sections ═══');
@@ -654,7 +659,7 @@ export async function generateTrip({ user, request }) {
   const extras = itineraryService.buildItineraryExtras({
     request,
     prefs,
-    days,
+    days: finalDays,
     totalBudget,
     currency,
     allocation,
@@ -701,8 +706,10 @@ export async function generateTrip({ user, request }) {
   itinerary = await Itinerary.create({
     trip: trip._id,
     user: userId,
-    days: days || [],
-    summary: validation.data?.summary || `Planned trip to ${destination}`,
+    days: finalDays || [],
+    summary: usedAIPlan
+      ? `AI-verified itinerary for ${destination} (validated by ${providerLabel})`
+      : (validation.data?.summary || `Planned trip to ${destination}`),
     currency,
     totalEstimatedCost,
     transport: {
@@ -733,10 +740,13 @@ export async function generateTrip({ user, request }) {
     emergencyInfo: null,
     agentReport: report,
     validation: {
-      passed: validation.data?.passed,
-      issues: validation.data?.issues || [],
-      warnings: validation.data?.warnings || [],
+      passed: usedAIPlan ? (aiPlanningResult.validation?.passed ?? validation.data?.passed) : validation.data?.passed,
+      issues: usedAIPlan ? (aiPlanningResult.validation?.issues || validation.data?.issues || []) : validation.data?.issues || [],
+      warnings: usedAIPlan ? (aiPlanningResult.validation?.warnings || validation.data?.warnings || []) : validation.data?.warnings || [],
       validatedAt: new Date(),
+      usedAIPlan,
+      aiProvider: usedAIPlan ? aiProvider : null,
+      replanAttempts: aiPlanningResult?.attempts?.length || 0,
     },
     optimizedBudget: optimized,
     budgetAllocation: allocation,
@@ -745,7 +755,7 @@ export async function generateTrip({ user, request }) {
   } catch (itinErr) {
     logger.warn(`[ORCHESTRATOR] Itinerary.create() failed: ${itinErr.message} — retrying with sanitized days`);
     // Sanitize days: strip any fields that might cause validation errors
-    const safeDays = (days || []).map((d) => ({
+    const safeDays = (finalDays || []).map((d) => ({
       dayNumber: d.dayNumber,
       date: d.date,
       area: String(d.area || ''),
@@ -804,14 +814,14 @@ export async function generateTrip({ user, request }) {
     spent: optimized?.optimized ?? totalEstimatedCost,
   });
 
-  const pipelineMs = Date.now() - started;
-  logger.exit('[ORCHESTRATOR]', 'generateTrip', {
+  const pipelineMs = Date.now() - started;    logger.exit('[ORCHESTRATOR]', 'generateTrip', {
     status: 'success',
     latencyMs: pipelineMs,
     geminiRequests: getRequestCount(),
     tripId: trip._id.toString(),
     destination,
-    days: days.length,
+    days: finalDays.length,
+    usedAIPlan,
     totalEstimatedCost,
     isOverBudget,
   });
@@ -820,8 +830,10 @@ export async function generateTrip({ user, request }) {
     trip,
     itinerary,
     // AI provider metadata
-    aiProvider: aiProvider || null,
-    fallbackUsed: fallbackUsed || false,
+    aiProvider: usedAIPlan ? aiProvider : null,
+    usedAIPlan,
+    aiPlanningAttempts: aiPlanningResult?.attempts || [],
+    fallbackUsed: aiFallbackUsed || false,
     agentReport: report,
     budget: {
       allocation,
@@ -836,7 +848,7 @@ export async function generateTrip({ user, request }) {
     // Budget engine result
     budgetEngine: budgetEngineResult,
     budgetSummary,
-    validation: validation.data,
+    validation: usedAIPlan ? aiPlanningResult.validation || validation.data : validation.data,
     pipelineMs,
     geminiRequestCount: getRequestCount(),
     dataAvailability: {

@@ -434,7 +434,8 @@ function getBestTimeSlot(openingHours) {
   
   // Find the opening time of the first period
   const period = openingHours.periods[0];
-  const [openH] = period.open.split(':').map(Number);
+  const openStr = typeof period.open === 'string' ? period.open : (period.open?.time || '09:00');
+  const [openH] = openStr.split(':').map(Number);
   return openH;
 }
 
