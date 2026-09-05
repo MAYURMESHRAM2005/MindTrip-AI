@@ -1,9 +1,9 @@
-import placesProvider from '../providers/places.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
 import zomatoProvider from '../providers/zomato.provider.js';
 import logger from '../utils/logger.js';
 
 /**
- * Restaurant Agent: real Geoapify Places results.
+ * Restaurant Agent: real Google Places results.
  * Now purely provider-based — no Gemini calls. Restaurants are returned
  * directly from the provider, sorted by relevance.
  */
@@ -38,7 +38,7 @@ class RestaurantAgent {
     }
 
     const restaurants = providerResult.data || [];
-    logger.info(`[AGENT:restaurant] Got ${restaurants.length} restaurants from Geoapify`);
+    logger.info(`[AGENT:restaurant] Got ${restaurants.length} restaurants from Google Places`);
 
     // Enrich restaurants with Zomato real ratings and average meal costs
     let withZomatoData = 0;
@@ -49,7 +49,7 @@ class RestaurantAgent {
         const lowerName = (r.name || '').toLowerCase();
         const zomato = zomatoMap.get(lowerName);
         if (zomato) {
-          // Use Zomato's real ratings (replace null Geoapify ratings)
+          // Use Zomato's real ratings (replace null Google Places ratings)
           if (zomato.rating != null) r.rating = zomato.rating;
           if (zomato.votes) r.reviewCount = zomato.votes;
           // Use Zomato's real average cost for two (replaces priceLevel estimate)
@@ -102,7 +102,7 @@ class RestaurantAgent {
         recommendations,
         isLive: true,
         mealPlan: [],
-        notes: `Restaurant data from Geoapify (${restaurants.length} options, ${withZomatoData} with Zomato real pricing)`,
+        notes: `Restaurant data from Google Places (${restaurants.length} options, ${withZomatoData} with Zomato real pricing)`,
         zomatoEnriched: withZomatoData,
       },
       message: `Restaurant data from provider (${restaurants.length} options, ${withZomatoData} with real pricing)`,

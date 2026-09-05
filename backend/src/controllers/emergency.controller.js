@@ -1,11 +1,11 @@
 import ApiResponse from '../utils/ApiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import EmergencyContact from '../models/EmergencyContact.js';
-import placesProvider from '../providers/places.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
 
 /**
  * Nearby emergency services (hospitals, police, pharmacies, embassies) via
- * Geoapify Places. Live data only - never fabricated.
+ * Google Places. Live data only - never fabricated.
  */
 export const nearby = asyncHandler(async (req, res) => {
   const { lat, lng, radius } = req.query;

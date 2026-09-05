@@ -187,7 +187,7 @@ export async function searchAttractions({ destination, limit = 30 }) {
 
 /**
  * Batch search for products linked to multiple attractions.
- * Useful for enriching Geoapify attractions with real Viator pricing.
+ * Useful for enriching Google attractions with real Viator pricing.
  *
  * Searches for each attraction name individually (up to a limit) and
  * returns a Map of attractionName → Viator products.

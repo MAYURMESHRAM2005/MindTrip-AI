@@ -7,7 +7,8 @@ import { useI18n } from '../../utils/i18n';
 
 /**
  * Interactive map of the trip: hotel, restaurants, attractions markers plus
- * the daily route polylines. Reuses the existing MapView (react-leaflet).
+ * the daily route polylines. Rendered by MapView on the Google Maps
+ * JavaScript API (markers open place details / Google Maps links).
  */
 export default function ItineraryMapCard({ mapData }) {
   const { t } = useI18n();

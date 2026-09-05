@@ -361,7 +361,7 @@ export function optimizeActivities({
     paid.act.place = freeAlt.name;
     paid.act.title = freeAlt.name;
     paid.act.description = `${freeAlt.types?.join(', ') || 'Free attraction'} — selected as budget-friendly alternative`;
-    paid.act.source = 'geoapify';
+    paid.act.source = 'google';
     paid.act.isLive = true;
     paid.act.dataStatus = 'live';
 
@@ -371,7 +371,7 @@ export function optimizeActivities({
       from: `${paid.act.title || 'Activity'} (${paid.amount} ${currency})`,
       to: `${freeAlt.name} (Free)`,
       saving,
-      source: 'geoapify',
+      source: 'google',
       sourceType: SOURCE_TYPES.API_LIVE,
       isLive: true,
     });

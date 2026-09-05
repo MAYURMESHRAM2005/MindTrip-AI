@@ -12,7 +12,7 @@ const VARIANTS = {
     subtitleKey: 'Stays near the destination within your budget',
     accent: 'from-indigo-500 to-violet-600',
     iconBg: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950 dark:text-indigo-400',
-    emptyKey: 'Live hotel offers unavailable — the itinerary uses a budget-based accommodation estimate.',
+    emptyKey: '🔴 Live hotel offers unavailable — no real hotel data to display.',
   },
   restaurant: {
     icon: UtensilsCrossed,
@@ -20,7 +20,7 @@ const VARIANTS = {
     subtitleKey: 'Where to eat — matched to your food preference',
     accent: 'from-rose-500 to-pink-600',
     iconBg: 'bg-rose-50 text-rose-600 dark:bg-rose-950 dark:text-rose-400',
-    emptyKey: 'Live restaurant data unavailable — explore the Restaurants page when online.',
+    emptyKey: '🔴 Live restaurant data unavailable — no real restaurant data to display.',
   },
   attraction: {
     icon: Landmark,
@@ -28,7 +28,7 @@ const VARIANTS = {
     subtitleKey: 'Top sights, hidden gems and nearby places',
     accent: 'from-amber-500 to-orange-600',
     iconBg: 'bg-amber-50 text-amber-600 dark:bg-amber-950 dark:text-amber-400',
-    emptyKey: 'Live attraction data unavailable — explore the Maps & Places pages when online.',
+    emptyKey: '🔴 Live attraction data unavailable — no real attraction data to display.',
   },
 };
 
@@ -48,6 +48,7 @@ function PlaceCard({ item, variant, currency }) {
   const Icon = variant === 'hotel' ? Hotel : variant === 'restaurant' ? UtensilsCrossed : Landmark;
   const showPrice =
     variant === 'hotel' ? item.pricePerNight != null : variant === 'restaurant' ? item.averageCost != null : item.entryFee?.amount != null;
+  const hasProvider = !!(item.provider || item.providerId);
 
   return (
     <div className="group flex flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
@@ -112,6 +113,14 @@ function PlaceCard({ item, variant, currency }) {
             {/* Live badge for hotels */}
             {variant === 'hotel' && item.isLive && (
               <p className="mt-0.5 text-[10px] text-emerald-500">● {t('Live price from provider')}</p>
+            )}
+            {/* Provider source info */}
+            {hasProvider && (
+              <p className="mt-0.5 text-[9px] text-slate-400">
+                {item.provider && <span>Source: {item.provider}</span>}
+                {item.provider && item.providerId && <span> · </span>}
+                {item.providerId && <span className="font-mono">ID: {item.providerId}</span>}
+              </p>
             )}
             {/* Fetched at timestamp */}
             {item.fetchedAt && (

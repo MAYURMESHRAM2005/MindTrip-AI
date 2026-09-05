@@ -36,7 +36,8 @@ const ATTRACTIONS = Array.from({ length: 10 }, (_, i) => ({
 const RESTAURANTS = Array.from({ length: 12 }, (_, i) => ({
   name: `Restaurant ${i + 1}`,
   placeId: `rest-${i + 1}`,
-  types: ['restaurant'],
+  provider: 'google',
+  types: ['catering.restaurant', 'restaurant'],
   address: `Area ${String.fromCharCode(65 + (i % 10))}, Goa`,
   suburb: `Area ${String.fromCharCode(65 + (i % 10))}`,
   coordinates: { lat: 15.52 + i * 0.005, lng: 73.75 + i * 0.003 },
@@ -52,6 +53,9 @@ const HOTEL_RESULT = {
   data: {
     isLive: true,
     recommended: {
+      id: 'grand-hotel-goa-001',
+      provider: 'amadeus',
+      isLive: true,
       name: 'Grand Hotel Goa',
       price: { amount: 3000, currency: 'INR' },
       latitude: 15.5,
@@ -85,8 +89,8 @@ test('TEST 1: 5-day trip — no attraction repeated across days', () => {
     const acts = [
       { title: 'Hotel', time: '07:00', category: 'hotel', provider: 'amadeus', providerId: 'Grand Hotel Goa',
         cost: { amount: 3000, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'amadeus-hotels' },
-      { title: 'Breakfast', time: '08:00', category: 'restaurant', provider: 'geoapify', providerId: `rest-${d * 2 - 1}`,
-        cost: { amount: 200 + (d * 2 - 1) * 100, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+      { title: 'Breakfast', time: '08:00', category: 'restaurant', provider: 'google', providerId: `rest-${d * 2 - 1}`,
+        cost: { amount: 200 + (d * 2 - 1) * 100, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: RESTAURANTS[d * 2 - 2].coordinates },
     ];
     // Pick a distinct attraction for morning and afternoon
@@ -95,18 +99,18 @@ test('TEST 1: 5-day trip — no attraction repeated across days', () => {
       const attr = ATTRACTIONS[idx];
       const time = slot === 'morning' ? '10:00' : '14:00';
       acts.push({
-        title: attr.name, time, category: 'attraction', provider: 'geoapify', providerId: attr.placeId,
-        cost: { amount: attr.entryFee.amount, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+        title: attr.name, time, category: 'attraction', provider: 'google', providerId: attr.placeId,
+        cost: { amount: attr.entryFee.amount, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: attr.coordinates,
       });
       usedAttractions.add(attr.placeId);
     }
     acts.push(
-      { title: `Lunch ${d}`, time: '13:00', category: 'restaurant', provider: 'geoapify', providerId: `rest-${d * 2}`,
-        cost: { amount: 300 + d * 100, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+      { title: `Lunch ${d}`, time: '13:00', category: 'restaurant', provider: 'google', providerId: `rest-${d * 2}`,
+        cost: { amount: 300 + d * 100, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: RESTAURANTS[d * 2 - 1].coordinates },
-      { title: `Dinner ${d}`, time: '19:30', category: 'restaurant', provider: 'geoapify', providerId: `rest-${d * 2 + 1}`,
-        cost: { amount: 400 + d * 100, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+      { title: `Dinner ${d}`, time: '19:30', category: 'restaurant', provider: 'google', providerId: `rest-${d * 2 + 1}`,
+        cost: { amount: 400 + d * 100, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: RESTAURANTS[d * 2]?.coordinates || RESTAURANTS[0].coordinates },
     );
     days.push({ dayNumber: d, date: `2025-06-0${d}`, activities: acts });
@@ -141,7 +145,7 @@ test('TEST 2: AI returns fake providerId → validator rejects it', () => {
   const aiDays = [{
     date: '2025-06-01', theme: 'Day 1',
     items: [
-      { type: 'attraction', provider: 'geoapify', providerId: 'FAKE-PLACE-DOES-NOT-EXIST',
+      { type: 'attraction', provider: 'google', providerId: 'FAKE-PLACE-DOES-NOT-EXIST',
         startTime: '09:00', endTime: '11:00', reason: 'Fake place' },
     ],
   }];
@@ -157,7 +161,7 @@ test('TEST 2: AI returns fake providerId → validator rejects it', () => {
     dayNumber: 1, date: new Date('2025-06-01'),
     activities: [
       { title: 'Fake Place', time: '09:00', category: 'attraction',
-        provider: 'geoapify', providerId: 'nonexistent-id-12345',
+        provider: 'google', providerId: 'nonexistent-id-12345',
         cost: { amount: 0, isEstimate: true }, dataStatus: 'estimate' },
     ],
   }];
@@ -180,12 +184,12 @@ test('TEST 3: AI returns attraction during closed hours → validator rejects an
     dayNumber: 1, date: new Date('2025-06-01'),
     activities: [
       { title: 'Attraction 1', time: '20:00', category: 'attraction',
-        provider: 'geoapify', providerId: 'attr-1',
-        cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+        provider: 'google', providerId: 'attr-1',
+        cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: ATTRACTIONS[0].coordinates, openingHours: ATTRACTIONS[0].openingHours },
       { title: 'Dinner', time: '19:00', category: 'restaurant',
-        provider: 'geoapify', providerId: 'rest-1',
-        cost: { amount: 300, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify' },
+        provider: 'google', providerId: 'rest-1',
+        cost: { amount: 300, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google' },
     ],
   }];
 
@@ -211,7 +215,7 @@ test('TEST 4: AI invents restaurant → providerId does not exist → system rej
   const aiDays = [{
     date: '2025-06-01', theme: 'Day 1',
     items: [
-      { type: 'restaurant', provider: 'geoapify', providerId: 'The-Magic-Kitchen-Invented',
+      { type: 'restaurant', provider: 'google', providerId: 'The-Magic-Kitchen-Invented',
         startTime: '12:00', endTime: '13:00', reason: 'Invented restaurant' },
     ],
   }];
@@ -223,7 +227,7 @@ test('TEST 4: AI invents restaurant → providerId does not exist → system rej
     dayNumber: 1, date: new Date('2025-06-01'),
     activities: [
       { title: 'Magic Kitchen', time: '12:00', category: 'restaurant',
-        provider: 'geoapify', providerId: 'magic-kitchen-invented',
+        provider: 'google', providerId: 'magic-kitchen-invented',
         cost: { amount: 500, isEstimate: true }, dataStatus: 'estimate' },
     ],
   }];
@@ -248,7 +252,7 @@ test('TEST 5: AI gives different price → backend uses provider price from cand
   const aiDays = [{
     date: '2025-06-01', theme: 'Day 1',
     items: [
-      { type: 'attraction', provider: 'geoapify', providerId: 'attr-1',
+      { type: 'attraction', provider: 'google', providerId: 'attr-1',
         startTime: '10:00', endTime: '12:00', reason: 'Fort visit' },
     ],
   }];
@@ -279,8 +283,8 @@ test('TEST 6: Budget exceeded → deterministic budget engine detects → AI get
         provider: 'amadeus', providerId: 'Grand Hotel Goa',
         cost: { amount: 15000, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'amadeus-hotels' },
       { title: 'Lunch', time: '13:00', category: 'restaurant',
-        provider: 'geoapify', providerId: 'rest-1',
-        cost: { amount: 2000, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify' },
+        provider: 'google', providerId: 'rest-1',
+        cost: { amount: 2000, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google' },
     ],
   }];
 
@@ -322,12 +326,12 @@ test('TEST 7: Two activities overlap → validator rejects the schedule', () => 
     dayNumber: 1, date: new Date('2025-06-01'),
     activities: [
       { title: 'Museum Visit', time: '09:00', category: 'attraction',
-        provider: 'geoapify', providerId: 'attr-1',
-        cost: { amount: 100, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+        provider: 'google', providerId: 'attr-1',
+        cost: { amount: 100, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: ATTRACTIONS[0].coordinates },
       { title: 'Lunch at Resto', time: '09:30', category: 'restaurant',
-        provider: 'geoapify', providerId: 'rest-1',
-        cost: { amount: 500, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+        provider: 'google', providerId: 'rest-1',
+        cost: { amount: 500, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: RESTAURANTS[0].coordinates },
     ],
   }];
@@ -353,12 +357,12 @@ test('TEST 8: Geographically distant consecutive activities → travel feasibili
     dayNumber: 1, date: new Date('2025-06-01'),
     activities: [
       { title: 'Goa Beach', time: '09:00', category: 'attraction',
-        provider: 'geoapify', providerId: 'attr-1',
-        cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+        provider: 'google', providerId: 'attr-1',
+        cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: { lat: 15.5, lng: 73.8 } },
       { title: 'Delhi Monument', time: '11:00', category: 'attraction',
-        provider: 'geoapify', providerId: 'attr-2',
-        cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+        provider: 'google', providerId: 'attr-2',
+        cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: { lat: 28.6, lng: 77.2 } }, // 1500km away
     ],
   }];
@@ -394,12 +398,12 @@ test('TEST 9: Gemini fails → deterministic fallback → still validates', () =
         provider: 'amadeus', providerId: 'Grand Hotel Goa',
         cost: { amount: 3000, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'amadeus-hotels' },
       { title: 'Attraction 1', time: '14:00', category: 'attraction',
-        provider: 'geoapify', providerId: 'attr-1',
-        cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+        provider: 'google', providerId: 'attr-1',
+        cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: ATTRACTIONS[0].coordinates },
       { title: 'Dinner', time: '19:00', category: 'restaurant',
-        provider: 'geoapify', providerId: 'rest-1',
-        cost: { amount: 400, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+        provider: 'google', providerId: 'rest-1',
+        cost: { amount: 400, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
         coordinates: RESTAURANTS[0].coordinates },
     ],
   }];
@@ -494,10 +498,10 @@ test('MongoDB stores FINAL VALIDATED itinerary — not the old raw deterministic
     dayNumber: 1, date: '2025-06-01', area: 'Baga',
     activities: [{
       title: 'Attraction 1', time: '10:00', category: 'attraction',
-      provider: 'geoapify', providerId: 'attr-1',
-      cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+      provider: 'google', providerId: 'attr-1',
+      cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
       coordinates: ATTRACTIONS[0].coordinates,
-      _resolvedFrom: 'geoapify:attr-1',
+      _resolvedFrom: 'google:attr-1',
     }],
   }];
   rebuildCosts(aiResolvedDays, { partySize: 2, totalBudget: 50000 });
@@ -575,12 +579,12 @@ test('Replanning: structured errors contain day + providerId + alternatives for 
       dayNumber: 1, date: new Date('2025-06-01'),
       activities: [
         { title: 'Attraction 1', time: '09:00', category: 'attraction',
-          provider: 'geoapify', providerId: 'attr-1',
-          cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+          provider: 'google', providerId: 'attr-1',
+          cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
           coordinates: ATTRACTIONS[0].coordinates },
         { title: 'Restaurant 1', time: '12:30', category: 'restaurant',
-          provider: 'geoapify', providerId: 'rest-1',
-          cost: { amount: 300, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+          provider: 'google', providerId: 'rest-1',
+          cost: { amount: 300, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
           coordinates: RESTAURANTS[0].coordinates },
       ],
     },
@@ -588,12 +592,12 @@ test('Replanning: structured errors contain day + providerId + alternatives for 
       dayNumber: 2, date: new Date('2025-06-02'),
       activities: [
         { title: 'Attraction 1 Again', time: '09:00', category: 'attraction',
-          provider: 'geoapify', providerId: 'attr-1',
-          cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+          provider: 'google', providerId: 'attr-1',
+          cost: { amount: 0, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
           coordinates: ATTRACTIONS[0].coordinates },
         { title: 'Restaurant 2', time: '12:30', category: 'restaurant',
-          provider: 'geoapify', providerId: 'rest-2',
-          cost: { amount: 400, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'geoapify',
+          provider: 'google', providerId: 'rest-2',
+          cost: { amount: 400, isEstimate: false }, dataStatus: 'live', isLive: true, source: 'google',
           coordinates: RESTAURANTS[1].coordinates },
       ],
     },
@@ -641,11 +645,11 @@ test('Full pipeline trace: normalize → AI plan → resolve → validate → co
     items: [
       { type: 'hotel', provider: 'amadeus', providerId: 'Grand Hotel Goa',
         startTime: '12:00', endTime: '12:30', reason: 'Check-in' },
-      { type: 'attraction', provider: 'geoapify', providerId: 'attr-1',
+      { type: 'attraction', provider: 'google', providerId: 'attr-1',
         startTime: '14:00', endTime: '16:00', reason: 'Historic fort' },
-      { type: 'restaurant', provider: 'geoapify', providerId: 'rest-1',
+      { type: 'restaurant', provider: 'google', providerId: 'rest-1',
         startTime: '12:30', endTime: '13:30', reason: 'Lunch' },
-      { type: 'restaurant', provider: 'geoapify', providerId: 'rest-2',
+      { type: 'restaurant', provider: 'google', providerId: 'rest-2',
         startTime: '19:00', endTime: '20:00', reason: 'Dinner' },
     ],
   }];

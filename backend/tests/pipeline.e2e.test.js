@@ -108,8 +108,16 @@ test('full pipeline: parallel collection → single Gemini call → valid itiner
         assert.ok(typeof act.title === 'string', `Activity "${act.title}" must have title`);
         assert.ok(typeof act.category === 'string', `Activity "${act.title}" must have category`);
         assert.ok(act.cost !== undefined, `Activity "${act.title}" must have cost`);
-        assert.ok(typeof act.cost.amount === 'number', `Activity "${act.title}" cost.amount must be a number`);
-        assert.ok(act.cost.amount >= 0, `Activity "${act.title}" cost.amount must be ≥ 0`);
+        // Unavailable costs carry amount null BY DESIGN ("never ₹0 — not
+        // fabricated"): the day builder emits null when no provider price
+        // exists and the frontend renders "price unavailable" for them.
+        // Everything else must carry a numeric, non-negative amount.
+        if (act.dataStatus === 'unavailable' && act.cost.amount == null) {
+          // allowed: unavailable → no fabricated price
+        } else {
+          assert.ok(typeof act.cost.amount === 'number', `Activity "${act.title}" cost.amount must be a number, got ${act.cost.amount}`);
+          assert.ok(act.cost.amount >= 0, `Activity "${act.title}" cost.amount must be ≥ 0`);
+        }
         assert.ok(typeof act.cost.isEstimate === 'boolean', `Activity "${act.title}" cost.isEstimate must be boolean`);
       }
 

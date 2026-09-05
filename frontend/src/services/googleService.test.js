@@ -15,7 +15,7 @@ const mockedNearby = vi.mocked(mapsApi.nearby);
 let service;
 
 beforeAll(async () => {
-  ({ default: service } = await import('./geoapifyService'));
+  ({ default: service } = await import('./googleService'));
 });
 
 beforeEach(() => {
@@ -24,7 +24,7 @@ beforeEach(() => {
   mockedNearby.mockReset();
 });
 
-describe('geoapifyService (backend proxy)', () => {
+describe('googleService (backend proxy)', () => {
   it('geocodes through the backend and normalizes coordinates', async () => {
     mockedGeocode.mockResolvedValue({
       data: { data: { geocode: { lat: 21.1458, lng: 79.0882, address: 'Nagpur, Maharashtra', placeId: 'abc' }, isLive: true } },
@@ -62,7 +62,7 @@ describe('geoapifyService (backend proxy)', () => {
     });
     const res = await service.getRoute('21.1,79.0', '21.2,79.1', 'drive');
 
-    // Geoapify-style 'drive' must be normalized to the backend's 'driving' mode.
+    // Google Places-style 'drive' must be normalized to the backend's 'driving' mode.
     expect(mockedRoutes).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'driving', alternatives: false })
     );

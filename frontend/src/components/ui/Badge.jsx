@@ -16,13 +16,18 @@ export default function Badge({ tone = 'slate', className, children }) {
 }
 
 /**
- * Data-status pill: live / estimate / unavailable.
+ * Data-status pill: live / estimated / unavailable.
+ * Derived exclusively from the backend dataStatus field.
+ * Optionally shows provider source inline from provenance.
  */
-export function DataStatusBadge({ status }) {
+export function DataStatusBadge({ status, provider, showProvider = false, provenance }) {
   const { t } = useI18n();
-  if (status === 'live') return <Badge tone="green">● {t('Live data')}</Badge>;
-  if (status === 'estimate') return <Badge tone="amber">≈ {t('Estimate')}</Badge>;
-  return <Badge tone="rose">{t('Live data unavailable')}</Badge>;
+  // Use provenance data when available for authoritative provider info
+  const resolvedProvider = provenance?.provider || provider;
+  const providerLabel = showProvider && resolvedProvider ? ` · ${resolvedProvider}` : '';
+  if (status === 'live') return <Badge tone="green">● {t('Live data')}{providerLabel}</Badge>;
+  if (status === 'estimated' || status === 'estimate') return <Badge tone="amber">≈ {t('Estimated')}{providerLabel}</Badge>;
+  return <Badge tone="rose">🔴 {t('Data unavailable')}{providerLabel}</Badge>;
 }
 
 export function ProviderStatusBadge({ configured }) {

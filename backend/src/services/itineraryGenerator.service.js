@@ -1,23 +1,30 @@
 import geminiService from './gemini.service.js';
 import groqService from './groq.service.js';
 import env from '../config/env.js';
+import trustedDatasetBuilder from './trustedDatasetBuilder.service.js';
+import geminiResponseValidator from './geminiResponseValidator.service.js';
 
 /**
- * Itinerary Generator Service — AI PLANNER MODE
+ * Itinerary Generator Service — ANTI-HALLUCINATION AI PLANNER MODE
  *
  * The AI acts purely as a PLANNER and SELECTOR:
- *   - Receives a verified candidate dataset from real APIs
+ *   - Receives a TRUSTED candidate dataset from verified provider data
  *   - Selects and arranges candidates into a personalized itinerary
  *   - Returns ONLY lightweight planning decisions:
  *     { provider, providerId, type, startTime, endTime, reason }
  *   - NEVER returns prices, coordinates, ratings, opening hours, etc.
  *
- * The backend resolves all factual data against the candidate dataset.
+ * ANTI-HALLUCINATION ARCHITECTURE:
+ *   1. Build trusted dataset from normalized candidates
+ *   2. Send ONLY trusted data to Gemini
+ *   3. Validate Gemini response against trusted dataset
+ *   4. Reject any item not in trusted dataset
+ *   5. Backend resolves all factual data from trusted dataset
  *
  * Architecture:
- *   AI returns planning decisions → Backend resolves provider IDs →
- *   Backend populates factual fields → Deterministic validation →
- *   Replan if invalid
+ *   Trusted dataset → Gemini selects → Schema validation →
+ *   Trusted dataset validation → Reject hallucinations →
+ *   Backend resolves provider IDs → Deterministic validation
  */
 
 const GEMINI_TIMEOUT_MS = env.GEMINI_TIMEOUT_MS || 45000;
@@ -56,7 +63,7 @@ function sanitizeItinerary(raw) {
  *       "items": [
  *         {
  *           "type": "attraction|restaurant|hotel|event|transport|nightlife",
- *           "provider": "geoapify|amadeus|ticketmaster|transport-intelligence",
+ *           "provider": "google|amadeus|ticketmaster|transport-intelligence",
  *           "providerId": "exact id from candidate dataset",
  *           "startTime": "HH:MM",
  *           "endTime": "HH:MM",
@@ -83,7 +90,7 @@ function validatePlannerSchema(raw) {
   }
 
   const VALID_TYPES = new Set(['attraction', 'restaurant', 'hotel', 'event', 'transport', 'nightlife', 'activity', 'flight', 'train', 'bus']);
-  const VALID_PROVIDERS = new Set(['geoapify', 'amadeus', 'ticketmaster', 'transport-intelligence']);
+  const VALID_PROVIDERS = new Set(['google', 'amadeus', 'ticketmaster', 'transport-intelligence']);
 
   for (let di = 0; di < root.days.length; di++) {
     const day = root.days[di];
@@ -164,9 +171,9 @@ function validatePlannerSchema(raw) {
 // ══════════════════════════════════════════════════════════════════════
 
 /**
- * Build the context for the AI planner.
- * Passes a flat, referenceable candidate list with just enough info
- * for the AI to make selection decisions.
+ * Build the context for the AI planner using the trusted dataset.
+ * The trusted dataset contains ONLY verified provider data.
+ * Gemini can ONLY select from this dataset.
  */
 function buildPlannerContext(data) {
   const {
@@ -190,136 +197,43 @@ function buildPlannerContext(data) {
     guide = {},
     safety = {},
     budgetAllocation = {},
+    // Anti-hallucination: pre-built trusted candidates from orchestrator
+    normalizedCandidates = [],
+    geoClusters = null,
+    dayAwareContext = null,
     replanErrors = undefined,
     previousPlan = undefined,
   } = data;
 
-  // Build candidate list — the AI selects from this list ONLY
-  const candidates = [];
+  // ═══ ANTI-HALLUCINATION: Build trusted dataset from normalized candidates ═══
+  // If normalizedCandidates are provided, use them to build the trusted dataset.
+  // Otherwise, fall back to building from raw provider data (legacy path).
+  let trustedDataset;
+  let candidates;
+  let trustedLookup;
 
-  // Attractions
-  for (const a of (attractions || []).slice(0, 15)) {
-    candidates.push({
-      id: `geoapify:${a.placeId || a.name}`,
-      provider: 'geoapify',
-      providerId: a.placeId || a.name,
-      type: 'attraction',
-      name: a.name || '',
-      tags: (a.types || []).join(', '),
-      rating: a.rating ?? null,
-      priceLevel: a.priceLevel ?? null,
-      address: a.address || '',
-      suburb: a.suburb || a.district || '',
-      hasEntryFee: Boolean(a.entryFee?.amount > 0),
-      hasOpeningHours: Boolean(a.openingHours?.periods?.length),
-      estimatedVisitHours: a.estimatedVisitHours || null,
+  if (normalizedCandidates.length > 0) {
+    // Primary path: build trusted dataset from pre-normalized candidates
+    trustedDataset = trustedDatasetBuilder.buildTrustedDataset({
+      candidates: normalizedCandidates,
+      weather,
+      guide,
+      safety,
+      geoClusters,
+      dayAwareContext,
     });
-  }
-
-  // Restaurants
-  for (const r of (restaurants || []).slice(0, 12)) {
-    candidates.push({
-      id: `geoapify:${r.placeId || r.name}`,
-      provider: 'geoapify',
-      providerId: r.placeId || r.name,
-      type: 'restaurant',
-      name: r.name || '',
-      tags: (r.cuisines || r.types || []).join(', '),
-      rating: r.rating ?? null,
-      priceLevel: r.priceLevel ?? null,
-      address: r.address || '',
-      suburb: r.suburb || '',
-      hasZomatoData: Boolean(r.zomatoData?.averageCostPerPerson),
-      averageCostPerPerson: r.averageCostPerPerson || r.zomatoData?.averageCostPerPerson || null,
-    });
-  }
-
-  // Nightlife
-  for (const n of (nightlife || []).slice(0, 8)) {
-    candidates.push({
-      id: `geoapify:${n.placeId || n.name}`,
-      provider: 'geoapify',
-      providerId: n.placeId || n.name,
-      type: 'nightlife',
-      name: n.name || '',
-      tags: (n.types || []).join(', '),
-      address: n.address || '',
-    });
-  }
-
-  // Hotels
-  const hotelRec = accommodation?.data?.recommended;
-  if (hotelRec) {
-    candidates.push({
-      id: `amadeus:${hotelRec.name}`,
-      provider: 'amadeus',
-      providerId: hotelRec.name || 'recommended-hotel',
-      type: 'hotel',
-      name: hotelRec.name || '',
-      tags: hotelRec.amenities?.join(', ') || '',
-      rating: hotelRec.rating ?? null,
-      pricePerNight: hotelRec.price?.amount ?? null,
-      address: hotelRec.address || '',
-    });
-  }
-  for (const h of (accommodation?.data?.hotels || []).slice(0, 5)) {
-    if (h.name === hotelRec?.name) continue;
-    candidates.push({
-      id: `amadeus:${h.name}`,
-      provider: 'amadeus',
-      providerId: h.name,
-      type: 'hotel',
-      name: h.name || '',
-      tags: h.amenities?.join(', ') || '',
-      rating: h.rating ?? null,
-      pricePerNight: h.price?.amount ?? null,
-      address: h.address || '',
-    });
-  }
-
-  // Transport
-  const transportSel = transport?.data?.selected;
-  if (transportSel) {
-    candidates.push({
-      id: `transport:${transport.mode}:${transportSel.airline || transportSel.trainName || transportSel.operator || 'selected'}`,
-      provider: 'transport-intelligence',
-      providerId: transportSel.flightNumber || transportSel.trainNumber || transportSel.operator || 'selected',
-      type: transport.mode || 'transport',
-      name: `${transportSel.airline || ''} ${transportSel.flightNumber || ''} ${transportSel.trainName || ''} ${transportSel.operator || ''}`.trim(),
-      departure: transportSel.departAt || transportSel.departure || '',
-      arrival: transportSel.arriveAt || transportSel.arrival || '',
-      duration: transportSel.duration || '',
-      price: transportSel.price?.amount ?? null,
-    });
-  }
-  for (const offer of (transport?.data?.offers || []).slice(0, 4)) {
-    candidates.push({
-      id: `transport:${offer.mode || transport?.mode}:${offer.airline || offer.trainName || offer.operator || 'alt'}`,
-      provider: 'transport-intelligence',
-      providerId: offer.flightNumber || offer.trainNumber || offer.operator || `alt-${candidates.length}`,
-      type: offer.mode || transport?.mode || 'transport',
-      name: `${offer.airline || ''} ${offer.trainName || ''} ${offer.operator || ''}`.trim(),
-      departure: offer.departAt || offer.departure || '',
-      arrival: offer.arriveAt || offer.arrival || '',
-      duration: offer.duration || '',
-      price: offer.price?.amount ?? null,
-    });
-  }
-
-  // Events
-  for (const e of (events?.events || events?.data?.events || []).slice(0, 10)) {
-    candidates.push({
-      id: `ticketmaster:${e.id || e.name}`,
-      provider: 'ticketmaster',
-      providerId: e.id || e.name,
-      type: 'event',
-      name: e.name || '',
-      tags: `${e.category || ''} ${e.genre || ''}`.trim(),
-      eventDate: e.date || '',
-      eventTime: e.time || '',
-      venue: e.venueName || '',
-      isFree: e.isFree || false,
-    });
+    candidates = trustedDataset.candidates;
+    trustedLookup = trustedDatasetBuilder.buildTrustedLookup(trustedDataset);
+  } else {
+    // Legacy path: build candidates from raw provider data
+    candidates = buildLegacyCandidates({ attractions, restaurants, nightlife, accommodation, transport, events });
+    trustedDataset = { candidates, weather: { available: false, forecast: [] }, guide: {}, safety: {}, _meta: { totalCandidates: candidates.length } };
+    trustedLookup = new Map();
+    for (const c of candidates) {
+      const key = `${c.provider}|${c.providerId}`;
+      if (key !== '|') trustedLookup.set(key, c);
+      if (c.name) trustedLookup.set(`name|${c.name.toLowerCase()}`, c);
+    }
   }
 
   // Weather summary
@@ -424,6 +338,20 @@ function validateAndPrepare(raw, context) {
   if (!sanitized) {
     return { valid: false, itinerary: null, errors: ['Response could not be sanitized'] };
   }
+
+  // Use the full anti-hallucination validation pipeline
+  if (context.trustedLookup) {
+    const result = geminiResponseValidator.validateGeminiResponse(sanitized, context.trustedLookup);
+    return {
+      valid: result.valid,
+      itinerary: result.data,
+      errors: result.errors,
+      warnings: result.warnings,
+      summary: result.summary,
+    };
+  }
+
+  // Fallback: basic schema validation only
   const validation = validatePlannerSchema(sanitized);
   if (!validation.valid) {
     return { valid: false, itinerary: null, errors: validation.errors };
@@ -479,7 +407,7 @@ export async function generateItinerary(data) {
     const checked = validateAndPrepare(geminiResult.data, context);
     if (checked.valid) {
       const totalLatencyMs = Date.now() - started;
-      console.log(`[AI] Gemini success (${geminiLatencyMs}ms)`);
+      console.log(`[AI] Gemini success (${geminiLatencyMs}ms) — ${checked.summary?.validated || 0} items validated, ${checked.summary?.rejected || 0} rejected`);
       return {
         success: true,
         itinerary: checked.itinerary,
@@ -489,6 +417,9 @@ export async function generateItinerary(data) {
         geminiRequestCount: requestNumber,
         latencyMs: totalLatencyMs,
         validationErrors: [],
+        validationWarnings: checked.warnings || [],
+        validationSummary: checked.summary || null,
+        trustedLookup: context.trustedLookup || null,
       };
     }
     geminiFailed = true;
@@ -521,7 +452,7 @@ export async function generateItinerary(data) {
     const checked = validateAndPrepare(groqResult.data, context);
     if (checked.valid) {
       const totalLatencyMs = Date.now() - started;
-      console.log(`[AI] Groq success (${groqLatencyMs}ms)`);
+      console.log(`[AI] Groq success (${groqLatencyMs}ms) — ${checked.summary?.validated || 0} items validated`);
       return {
         success: true,
         itinerary: checked.itinerary,
@@ -531,6 +462,9 @@ export async function generateItinerary(data) {
         geminiRequestCount: requestNumber,
         latencyMs: totalLatencyMs,
         validationErrors: [],
+        validationWarnings: checked.warnings || [],
+        validationSummary: checked.summary || null,
+        trustedLookup: context.trustedLookup || null,
       };
     }
     const totalLatencyMs = Date.now() - started;
@@ -563,6 +497,163 @@ export async function generateItinerary(data) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+//  LEGACY CANDIDATE BUILDER (fallback when normalized candidates not provided)
+// ══════════════════════════════════════════════════════════════════════
+
+function buildLegacyCandidates({ attractions, restaurants, nightlife, accommodation, transport, events }) {
+  const candidates = [];
+
+  for (const a of (attractions || []).slice(0, 15)) {
+    candidates.push({
+      id: `google|${a.placeId || a.name}`,
+      provider: 'google',
+      providerId: a.placeId || a.name,
+      type: 'attraction',
+      name: a.name || '',
+      tags: (a.types || []).join(', '),
+      rating: a.rating ?? null,
+      priceLevel: a.priceLevel ?? null,
+      address: a.address || '',
+      suburb: a.suburb || a.district || '',
+      latitude: a.coordinates?.lat ?? null,
+      longitude: a.coordinates?.lng ?? null,
+      hasOpeningHours: Boolean(a.openingHours?.periods?.length),
+      dataStatus: a.dataStatus || 'estimate',
+      source: 'google',
+      isEstimate: Boolean(a.isEstimate),
+    });
+  }
+
+  for (const r of (restaurants || []).slice(0, 12)) {
+    candidates.push({
+      id: `restaurant|${r.placeId || r.name}`,
+      provider: r.provider || r.source || 'google',
+      providerId: r.placeId || r.name,
+      type: 'restaurant',
+      name: r.name || '',
+      tags: (r.cuisines || r.types || []).join(', '),
+      rating: r.rating ?? null,
+      priceLevel: r.priceLevel ?? null,
+      address: r.address || '',
+      suburb: r.suburb || '',
+      latitude: r.coordinates?.lat ?? null,
+      longitude: r.coordinates?.lng ?? null,
+      hasOpeningHours: Boolean(r.openingHours?.periods?.length),
+      averageCostPerPerson: r.averageCostPerPerson || r.zomatoData?.averageCostPerPerson || null,
+      dataStatus: r.dataStatus || 'estimate',
+      source: r.source || 'google',
+      isEstimate: Boolean(r.isEstimate),
+    });
+  }
+
+  for (const n of (nightlife || []).slice(0, 8)) {
+    candidates.push({
+      id: `nightlife|${n.placeId || n.name}`,
+      provider: 'google',
+      providerId: n.placeId || n.name,
+      type: 'nightlife',
+      name: n.name || '',
+      tags: (n.types || []).join(', '),
+      address: n.address || '',
+      latitude: n.coordinates?.lat ?? null,
+      longitude: n.coordinates?.lng ?? null,
+      dataStatus: 'estimate',
+      source: 'google',
+      isEstimate: true,
+    });
+  }
+
+  const hotelRec = accommodation?.data?.recommended;
+  if (hotelRec?.name && hotelRec?.price?.amount > 0) {
+    candidates.push({
+      id: `hotel|${hotelRec.name}`,
+      provider: 'amadeus',
+      providerId: hotelRec.name || 'recommended-hotel',
+      type: 'hotel',
+      name: hotelRec.name || '',
+      tags: hotelRec.amenities?.join(', ') || '',
+      rating: hotelRec.rating ?? null,
+      pricePerNight: hotelRec.price?.amount ?? null,
+      address: hotelRec.address || '',
+      dataStatus: accommodation?.data?.isLive ? 'live' : 'unavailable',
+      source: 'amadeus',
+      isEstimate: Boolean(!accommodation?.data?.isLive),
+    });
+  }
+  for (const h of (accommodation?.data?.hotels || []).slice(0, 5)) {
+    if (h.name === hotelRec?.name || !h.name || !h.price?.amount) continue;
+    candidates.push({
+      id: `hotel|${h.name}`,
+      provider: 'amadeus',
+      providerId: h.name,
+      type: 'hotel',
+      name: h.name || '',
+      tags: h.amenities?.join(', ') || '',
+      rating: h.rating ?? null,
+      pricePerNight: h.price?.amount ?? null,
+      address: h.address || '',
+      dataStatus: 'unavailable',
+      source: 'amadeus',
+      isEstimate: true,
+    });
+  }
+
+  const transportSel = transport?.data?.selected;
+  if (transportSel) {
+    candidates.push({
+      id: `transport|${transportSel.flightNumber || transportSel.trainNumber || transportSel.operator || 'selected'}`,
+      provider: 'transport-intelligence',
+      providerId: transportSel.flightNumber || transportSel.trainNumber || transportSel.operator || 'selected',
+      type: transport.mode || 'transport',
+      name: `${transportSel.airline || ''} ${transportSel.flightNumber || ''} ${transportSel.trainName || ''} ${transportSel.operator || ''}`.trim(),
+      departure: transportSel.departAt || transportSel.departure || '',
+      arrival: transportSel.arriveAt || transportSel.arrival || '',
+      duration: transportSel.duration || '',
+      price: transportSel.price?.amount ?? null,
+      dataStatus: transport?.data?.isLive ? 'live' : 'unavailable',
+      source: 'transport-intelligence',
+      isEstimate: Boolean(!transport?.data?.isLive),
+    });
+  }
+  for (const offer of (transport?.data?.offers || []).slice(0, 4)) {
+    candidates.push({
+      id: `transport|${offer.flightNumber || offer.trainNumber || offer.operator || `alt-${candidates.length}`}`,
+      provider: 'transport-intelligence',
+      providerId: offer.flightNumber || offer.trainNumber || offer.operator || `alt-${candidates.length}`,
+      type: offer.mode || transport?.mode || 'transport',
+      name: `${offer.airline || ''} ${offer.trainName || ''} ${offer.operator || ''}`.trim(),
+      departure: offer.departAt || offer.departure || '',
+      arrival: offer.arriveAt || offer.arrival || '',
+      duration: offer.duration || '',
+      price: offer.price?.amount ?? null,
+      dataStatus: offer.isLive ? 'live' : 'estimate',
+      source: 'transport-intelligence',
+      isEstimate: Boolean(!offer.isLive),
+    });
+  }
+
+  for (const e of (events?.events || events?.data?.events || []).slice(0, 10)) {
+    candidates.push({
+      id: `event|${e.id || e.name}`,
+      provider: 'ticketmaster',
+      providerId: e.id || e.name,
+      type: 'event',
+      name: e.name || '',
+      tags: `${e.category || ''} ${e.genre || ''}`.trim(),
+      eventDate: e.date || '',
+      eventTime: e.time || '',
+      venue: e.venueName || '',
+      isFree: e.isFree || false,
+      dataStatus: e.isAvailable !== false ? 'live' : 'unavailable',
+      source: 'ticketmaster',
+      isEstimate: Boolean(e.priceRange?.isEstimate),
+    });
+  }
+
+  return candidates;
+}
+
+// ══════════════════════════════════════════════════════════════════════
 //  PROMPTS — AI as PLANNER, not data generator
 // ══════════════════════════════════════════════════════════════════════
 
@@ -577,26 +668,38 @@ Your job is to SELECT and ARRANGE pre-verified travel candidates into a personal
 
 You are a PLANNER, not a data generator. You do NOT create, invent, or fabricate any factual information.
 
+═══ ANTI-HALLUCINATION ARCHITECTURE ═══
+
+You receive a TRUSTED DATASET of verified candidates from real travel providers.
+Every candidate has a unique "candidateId" (e.g., "google-goi-123").
+You MUST return ONLY candidate IDs. The backend hydrates the full data.
+
+If a candidate is NOT in the TRUSTED DATASET, it CANNOT appear in your output.
+Your response will be validated against the trusted dataset. Any unknown candidateId will be REJECTED.
+
 ═══ CRITICAL RULES ═══
 
-1. You receive a CANDIDATES list of verified places, restaurants, hotels, transport options, and events. You MUST select ONLY from this list.
+1. You receive a CANDIDATES list. Each candidate has a "candidateId". You MUST select ONLY from this list.
 
 2. Every item you include MUST contain:
-   - "provider": the provider name EXACTLY as shown in the candidate's "provider" field
-   - "providerId": the providerId EXACTLY as shown in the candidate's "providerId" field
+   - "candidateId": the candidateId EXACTLY as shown in the candidate's "candidateId" field
+   - "type": the candidate's type (attraction, restaurant, hotel, event, transport, nightlife)
+   - "time": the planned time in HH:MM format
+   - "reason": why this candidate was selected
 
-3. NEVER invent any of the following:
-   - Places, restaurants, hotels, activities, or events
+3. NEVER return any of the following as factual entities:
+   - Place names, restaurant names, hotel names
    - Prices, costs, or monetary values
    - Ratings or reviews
    - Coordinates or addresses
    - Opening hours or availability
-   - Booking URLs or images
-   - Durations or distances
-   - Weather conditions or temperatures
+   - Provider names or provider IDs (use candidateId instead)
    - Any factual data whatsoever
 
-4. If the CANDIDATES list lacks something needed for a time slot, leave it empty or suggest "Free time" — do NOT invent a placeholder.
+4. If the CANDIDATES list lacks something needed for a time slot, omit that time slot — do NOT invent a placeholder.
+
+5. DO NOT include any factual fields in your output.
+The backend hydrates ALL factual data from the trusted dataset after you select candidate IDs.
 
 ═══ WHAT YOU OPTIMIZE ═══
 
@@ -613,7 +716,7 @@ You should consider ALL of the following when making selections:
 - Event dates — only schedule events on their actual eventDate
 - Meal timing — breakfast (07:00-10:00), lunch (12:00-14:00), dinner (18:00-21:00)
 - Hotel location — prefer candidates near the hotel for each day
-- No duplicate attractions across days (use providerId to track)
+- No duplicate attractions across days (use candidateId to track)
 
 ═══ STRUCTURAL RULES ═══
 
@@ -633,15 +736,15 @@ Return ONLY a JSON object with this exact structure:
 {
   "days": [
     {
+      "dayNumber": 1,
       "date": "YYYY-MM-DD",
-      "theme": "Brief theme for the day (e.g. 'Arrival & Beach Hopping')",
+      "areaId": "area-1",
+      "theme": "Brief theme for the day (e.g. 'South Mumbai Heritage')",
       "items": [
         {
+          "candidateId": "EXACT candidateId from CANDIDATES list",
           "type": "attraction|restaurant|hotel|event|transport|nightlife",
-          "provider": "EXACT provider value from candidate",
-          "providerId": "EXACT providerId value from candidate",
-          "startTime": "HH:MM",
-          "endTime": "HH:MM",
+          "time": "HH:MM",
           "reason": "Brief reason for this selection"
         }
       ]
@@ -650,14 +753,13 @@ Return ONLY a JSON object with this exact structure:
 }
 
 Rules for the output:
-- "type" must match the candidate's "type" field
-- "provider" must match the candidate's "provider" field EXACTLY
-- "providerId" must match the candidate's "providerId" field EXACTLY
-- "startTime" and "endTime" must be in HH:MM format
-- "reason" explains WHY this candidate was selected (for personalization)
+- "candidateId" must match EXACTLY from the CANDIDATES list
+- "type" must match the candidate's type
+- "time" must be in HH:MM format
+- "reason" explains WHY this candidate was selected
 - Do NOT include any fields other than the ones listed above
-- Do NOT include prices, coordinates, ratings, addresses, or any factual data
-- The backend will resolve all factual data from the candidate dataset`;
+- Do NOT include names, prices, coordinates, ratings, addresses, or any factual data
+- The backend hydrates all factual data from the trusted dataset`;
 }
 
 /**

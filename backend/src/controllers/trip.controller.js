@@ -7,7 +7,7 @@ import Itinerary from '../models/Itinerary.js';
 import AIConversation from '../models/AIConversation.js';
 import Expense from '../models/Expense.js';
 import orchestrator from '../orchestrator/tripOrchestrator.js';
-import finalValidatorAgent from '../agents/finalValidator.agent.js';
+import finalValidatorAgent, { validationMessages } from '../agents/finalValidator.agent.js';
 import pdfService from '../services/pdf.service.js';
 import budgetService from '../services/budget.service.js';
 import geminiService from '../services/gemini.service.js';
@@ -33,15 +33,19 @@ async function refreshValidation(itinerary, trip) {
     prefs: trip.preferences || {},
   });
   const old = itinerary.validation || {};
+  // The validator emits structured entries ({ type, day, message }) but the
+  // persisted schema + UI expect plain strings — reduce before comparing/persisting.
+  const freshIssues = validationMessages(fresh.issues);
+  const freshWarnings = validationMessages(fresh.warnings);
   const changed =
     old.passed !== fresh.passed ||
-    JSON.stringify(old.issues || []) !== JSON.stringify(fresh.issues) ||
-    JSON.stringify(old.warnings || []) !== JSON.stringify(fresh.warnings);
+    JSON.stringify(old.issues || []) !== JSON.stringify(freshIssues) ||
+    JSON.stringify(old.warnings || []) !== JSON.stringify(freshWarnings);
   if (changed) {
     itinerary.set('validation', {
       passed: fresh.passed,
-      issues: fresh.issues,
-      warnings: fresh.warnings,
+      issues: freshIssues,
+      warnings: freshWarnings,
       validatedAt: new Date(),
     });
     try {

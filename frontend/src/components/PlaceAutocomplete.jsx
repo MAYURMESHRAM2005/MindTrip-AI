@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MapPin, Loader2 } from 'lucide-react';
 import { mapsApi } from '../services/apiClient';
+import useDebouncedValue from '../hooks/useDebouncedValue';
 import { Field } from './ui/Input';
 import { cn } from '../utils/format';
 import { useI18n } from '../utils/i18n';
@@ -9,7 +10,7 @@ import { useI18n } from '../utils/i18n';
 /**
  * City / place autocomplete input — "Nag" → suggests "Nagpur".
  *
- * Debounces typing, queries the backend /maps/autocomplete endpoint (Geoapify)
+ * Debounces typing, queries the backend /maps/autocomplete endpoint (Google Places)
  * and shows a keyboard-navigable suggestions dropdown. Works both as a labelled
  * field (like <Input>) and bare (e.g. inside a <Field>).
  *
@@ -36,25 +37,26 @@ export default function PlaceAutocomplete({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
-  const [debounced, setDebounced] = useState('');
+  // One request per 400ms pause of typing — never one per keystroke.
+  const debounced = useDebouncedValue(value || '', 400);
   const blurTimer = useRef(null);
-
-  // Debounce the input before hitting the backend.
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced((value || '').trim()), 250);
-    return () => clearTimeout(t);
-  }, [value]);
 
   useEffect(() => () => clearTimeout(blurTimer.current), []);
 
   const { data, isFetching } = useQuery({
     queryKey: ['place-autocomplete', type, debounced],
-    queryFn: () => mapsApi.autocomplete({ q: debounced, type, limit }).then((r) => r.data.data),
+    // Pass react-query's AbortSignal so superseded in-flight requests are
+    // cancelled instead of completing and being thrown away.
+    queryFn: ({ signal }) => mapsApi.autocomplete({ q: debounced, type, limit }, { signal }).then((r) => r.data.data),
     enabled: debounced.length >= minChars,
     staleTime: 60_000,
   });
 
   const suggestions = data?.isLive ? data.suggestions || [] : [];
+  // When the backend could not search at all (key/billing/permission problem,
+  // quota, outage) it reports isLive:false with an explanatory message. Show
+  // that instead of a misleading "No matching places — keep typing".
+  const searchError = data && data.isLive === false ? data.message || t('Live data unavailable') : null;
 
   const pick = (s) => {
     onChange(s.name || s.formatted || '');
@@ -123,6 +125,11 @@ export default function PlaceAutocomplete({
           {isFetching ? (
             <p className="flex items-center gap-2 px-3.5 py-3 text-xs text-slate-400">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('Searching places…')}
+            </p>
+          ) : searchError ? (
+            <p className="flex items-center gap-1.5 px-3.5 py-3 text-xs text-slate-500">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+              <span className="min-w-0">{searchError}</span>
             </p>
           ) : suggestions.length === 0 ? (
             <p className="px-3.5 py-3 text-xs text-slate-400">{t('No matching places. Keep typing or press Enter.')}</p>

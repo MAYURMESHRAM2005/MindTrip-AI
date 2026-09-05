@@ -1,5 +1,8 @@
 import { haversineKm } from '../utils/geo.js';
 import budgetService from './budget.service.js';
+import geoClustering from './geographicClustering.service.js';
+import mealEngine from './mealAssignmentEngine.service.js';
+import { createProviderProvenance, createEstimatedProvenance, createUnavailableProvenance, ensureProvenance } from '../validators/provenanceValidator.js';
 
 /**
  * Deterministic schedule builder. Composes real provider data into a
@@ -102,7 +105,7 @@ function proximityAreas(items, destination) {
 /**
  * Cluster real attractions into geographic areas. Uses the provider's locality
  * fields first; when those produce fewer than two areas (very common with real
- * Geoapify data, where everything shares the destination city) it falls back to
+ * Google data, where everything shares the destination city) it falls back to
  * coordinate-proximity grouping so each day still gets its own region.
  * Returns [{ name, centroid, attractions }].
  */
@@ -221,51 +224,49 @@ function validateNoDuplicateAttractions(days) {
 function restaurantMealCost(r, meal, partySize, currency) {
   const cur = currency || 'INR';
 
-  // Use Zomato real average cost when available (not an estimate)
-  if (r.zomatoData && r.zomatoData.averageCostPerPerson > 0) {
-    let perPerson = r.zomatoData.averageCostPerPerson;
+  // Priority 1: Use actual average cost from provider (Zomato, meal engine, etc.)
+  const providerCost = r.averageCostPerPerson || r.zomatoData?.averageCostPerPerson || 0;
+  if (providerCost > 0) {
+    let perPerson = providerCost;
     // Adjust per meal type: breakfast ~60%, lunch ~85%, dinner ~115% of average
     if (meal === 'breakfast') perPerson = Math.max(80, Math.round(perPerson * 0.6));
     else if (meal === 'lunch') perPerson = Math.round(perPerson * 0.85);
     else if (meal === 'dinner') perPerson = Math.round(perPerson * 1.15);
     const amount = Math.round(perPerson * partySize * 100) / 100;
+    const isEstimate = Boolean(r.isEstimate);
+    const dataStatus = r.dataStatus || (isEstimate ? 'estimate' : 'live');
     return {
       amount,
       perPerson,
       currency: cur,
-      isEstimate: false,
-      estimateNote: `Real average cost from Zomato (${meal}) × ${partySize} traveller(s) — ${r.zomatoData.ratingText || 'rated'} ${r.zomatoData.rating ?? ''} (${r.zomatoData.votes ?? 0} votes)`,
-      source: 'zomato',
-      fetchedAt: r.zomatoData.fetchedAt || NOW_ISO,
+      isEstimate,
+      dataStatus,
+      estimateNote: dataStatus === 'live'
+        ? `Real price from ${r.source || r.provider || 'provider'} (${meal}) × ${partySize} traveller(s)`
+        : `Estimated from ${r.source || r.provider || 'provider'} priceLevel (${meal}) × ${partySize} traveller(s)`,
+      source: r.source || r.provider || 'restaurant-engine',
+      fetchedAt: r.zomatoData?.fetchedAt || NOW_ISO,
     };
   }
 
-  // Fallback: Geoapify priceLevel estimate (always marked as estimate)
-  const base = RESTAURANT_PRICE_BY_LEVEL[r.priceLevel ?? 1] ?? 350;
-  let perPerson = base;
-  if (meal === 'breakfast') perPerson = Math.max(80, Math.round(base * 0.6));
-  if (meal === 'dinner') perPerson = Math.round(base * 1.15);
-  const amount = Math.round(perPerson * partySize * 100) / 100;
+  // Priority 2: No provider price — do NOT invent a price
+  // Return null amount with honest unavailability
   return {
-    amount,
-    perPerson,
+    amount: null,
+    perPerson: null,
     currency: cur,
-    isEstimate: true,
-    estimateNote: `Estimated ~${cur} ${perPerson}/person × ${partySize} traveller(s) based on restaurant price level ${r.priceLevel ?? 'unknown'}. Actual menu prices not available from provider.`,
-    source: 'geoapify-pricelevel-estimate',
+    isEstimate: false,
+    dataStatus: 'unavailable',
+    estimateNote: `No provider price available for ${meal} at ${r.name || 'unknown restaurant'} — not fabricated`,
+    source: 'unavailable',
     fetchedAt: NOW_ISO,
   };
 }
 
 function entryFeeEstimateFor(attraction) {
-  // Geoapify does not provide entry fee data. All fees are estimates
-  // based on attraction type. Never present these as real API prices.
-  const name = String(attraction?.name || '').toLowerCase();
-  const types = (attraction?.types || []).join(' ').toLowerCase();
-  if (/museum|gallery|monument|fort|palace|temple|church|mosque|zoo|park|garden|waterfall/.test(name + ' ' + types)) {
-    return { amount: 200, isEstimate: true, estimateNote: 'Estimated typical entry fee - no live pricing available from provider. Confirm locally.' };
-  }
-  return { amount: 0, isEstimate: true, estimateNote: 'Entry fee unknown - no live pricing available from provider. Confirm locally.' };
+  // No provider price available — return null, never invent a price
+  // The caller must handle null and show "Price unavailable" to the user
+  return { amount: null, isEstimate: false, dataStatus: 'unavailable', estimateNote: 'No provider price available — not fabricated' };
 }
 
 function attractionCost(a, currency, partySize) {
@@ -283,16 +284,17 @@ function attractionCost(a, currency, partySize) {
       fetchedAt: a.entryFee.fetchedAt || NOW_ISO,
     };
   }
-  // Fallback to estimate when no Viator data is available
+  // No provider price available — do NOT invent a price
+  // Return null amount with honest unavailability
   const fee = entryFeeEstimateFor(a);
-  const perPerson = fee.amount;
   return {
-    amount: Math.round(perPerson * partySize * 100) / 100,
-    perPerson,
+    amount: fee.amount, // null — not fabricated
+    perPerson: null,
     currency,
-    isEstimate: true,
-    estimateNote: perPerson ? `${fee.estimateNote} × ${partySize} traveller(s)` : fee.estimateNote,
-    source: 'estimate',
+    isEstimate: false,
+    dataStatus: 'unavailable',
+    estimateNote: fee.estimateNote,
+    source: 'unavailable',
     fetchedAt: NOW_ISO,
   };
 }
@@ -328,7 +330,7 @@ function travelBetween(a, b) {
       durationMin: cached.durationMin,
       method: cached.method || 'taxi/auto',
       isEstimate: false,
-      source: 'geoapify-routes',
+      source: 'google-routes',
     };
   }
 
@@ -394,7 +396,7 @@ function isLikelyOpenEvening(p) {
 
 /**
  * Check if a place is open at a given hour using parsed opening hours.
- * @param {object} openingHours - Parsed opening hours from Geoapify
+ * @param {object} openingHours - Parsed opening hours from Google
  * @param {number} hour - Hour to check (0-23)
  * @param {string} dayOfWeek - Optional day abbreviation (Mo, Tu, We, Th, Fr, Sa, Su)
  * @returns {boolean}
@@ -500,24 +502,24 @@ function fitHotelToBudget(hotelResult, perRoomNight, nights, rooms) {
   const ordered = [...candidates].sort((a, b) => (a.price?.amount ?? Infinity) - (b.price?.amount ?? Infinity));
   const chosen = ordered[0] || (recommended && within(recommended) ? recommended : null);
 
-  if (chosen) {
-    const nightly = chosen.price?.amount ?? perRoomNight;
+  if (chosen && chosen.price?.amount > 0) {
+    const nightly = chosen.price.amount;
     const total = Math.round(nightly * nights * rooms * 100) / 100;
     return {
       hotel: chosen,
       nightly,
       total,
-      isLive: data.isLive === true && chosen.price?.amount != null,
-      notes: budgeted && nightly > perRoomNight ? `Hotel rate capped to fit the accommodation budget.` : '',
+      isLive: data.isLive === true,
+      notes: budgeted && nightly > perRoomNight ? `Hotel rate exceeds accommodation budget allocation.` : '',
     };
   }
-  // No live hotel fits -> honest budget estimate (never an invented hotel).
+  // No live hotel with a valid price -> honest unavailability (never an invented hotel or price).
   return {
     hotel: null,
-    nightly: perRoomNight,
-    total: Math.round(perRoomNight * nights * rooms * 100) / 100,
+    nightly: null,
+    total: 0,
     isLive: false,
-    notes: 'Live hotel data unavailable or out of budget - nightly rate estimated from accommodation allocation.',
+    notes: 'Live hotel data unavailable — no provider offers found.',
   };
 }
 
@@ -556,6 +558,9 @@ export function buildDaysPlan({
   const adults = Math.max(1, Number(travelers?.adults) || 1);
   const rooms = budgetService.roomsForParty({ adults, children: Number(travelers?.children) || 0 });
   const nights = Math.max(0, dates.length - 1);
+  // Monotonic counter for unique fallback providerIds within a single build call
+  let _activitySeq = 0;
+  const nextSeq = () => `${Date.now()}-${++_activitySeq}`;
   const daily = budgetService.planDailyBudgets({ allocation, daysCount: dates.length, nights, rooms });
 
   const hotelPlan = fitHotelToBudget(hotelResult, daily.perDay.hotelPerRoomNight, nights, rooms);
@@ -572,10 +577,35 @@ export function buildDaysPlan({
   const localTransportPerDay = Math.round((transportAlloc * 0.3) / Math.max(1, dates.length) * 100) / 100;
   const outboundCost = selectedTransport?.price?.amount ?? outboundEstimate;
 
-  // Geographic areas - one per day, real locality names when available.
-  const areas = clusterAreas(attractions, destination);
-  const areaForDay = (idx) => areas[idx % Math.max(1, areas.length)];
-  const areaRepeat = areas.length < dates.length;
+  // Geographic areas - one per day, radius-clustered and route-optimized.
+  const geoResult = geoClustering.runGeographicClustering({
+    attractions: attractions || [],
+    restaurants: restaurants || [],
+    nightlife: nightlife || [],
+    events: [],
+    daysCount: dates.length,
+    destination,
+    hotelCentroid: hotel?.coordinates || null,
+    logPipeline: false,
+  });
+  // Use clustering zones as the primary area assignment
+  const geoZones = geoResult.dayAssignments || [];
+  // Fallback to basic clustering if geo clustering returns nothing
+  const basicAreas = clusterAreas(attractions, destination);
+  const areas = geoZones.length >= dates.length ? geoZones : basicAreas;
+  const areaForDay = (idx) => {
+    if (geoZones.length >= dates.length) {
+      const zone = geoZones[idx];
+      // Normalize to { centroid, attractions } format expected by day builder
+      return {
+        name: zone.zone || zone.name || `Area ${idx + 1}`,
+        centroid: zone.centroid,
+        attractions: zone.attractionPool || zone.attractions || [],
+      };
+    }
+    return basicAreas[idx % Math.max(1, basicAreas.length)];
+  };
+  const areaRepeat = basicAreas.length < dates.length && geoZones.length < dates.length;
 
   const attractionsPool = attractions?.slice() || [];
   const restaurantsPool = restaurants?.slice() || [];
@@ -617,22 +647,47 @@ export function buildDaysPlan({
       // Last resort: use the full pool but exclude already-used attractions
       dayAttractions = attractionsPool.filter((x) => !usedAttractions.has(placeKey(x)));
     }
-    // Filter restaurants: exclude already-used ones, prefer nearby
+    // Filter restaurants: prefer geo-zone pool, then nearby, then full pool
+    // Exclude already-used restaurants to prevent cross-day repeats
+    const geoZoneRestaurants = (geoZones[idx % Math.max(1, geoZones.length)]?.restaurantPool || [])
+      .filter((x) => !usedRestaurants.has(placeKey(x)));
     const nearbyRestaurants = near(restaurantsPool, LOCAL_RADIUS_KM, usedRestaurants);
-    const dayRestaurants = nearbyRestaurants.length > 0
-      ? nearbyRestaurants
-      : restaurantsPool.filter((x) => !usedRestaurants.has(placeKey(x)));
-    // Filter nightlife: exclude already-used ones, prefer nearby
+    const dayRestaurants = geoZoneRestaurants.length > 0
+      ? geoZoneRestaurants
+      : nearbyRestaurants.length > 0
+        ? nearbyRestaurants
+        : restaurantsPool.filter((x) => !usedRestaurants.has(placeKey(x)));
+    // Filter nightlife: prefer geo-zone pool, then nearby, then full pool
+    const geoZoneNightlife = (geoZones[idx % Math.max(1, geoZones.length)]?.nightlifePool || [])
+      .filter((x) => !usedNightlife.has(placeKey(x)));
     const nearbyNightlife = near(nightlifePool, LOCAL_RADIUS_KM, usedNightlife);
-    const dayNightlife = nearbyNightlife.length > 0
-      ? nearbyNightlife
-      : nightlifePool.filter((x) => !usedNightlife.has(placeKey(x)));
+    const dayNightlife = geoZoneNightlife.length > 0
+      ? geoZoneNightlife
+      : nearbyNightlife.length > 0
+        ? nearbyNightlife
+        : nightlifePool.filter((x) => !usedNightlife.has(placeKey(x)));
 
-    // --- distinct place selection for this day -----------------------
+    // --- meal assignment via deterministic engine -------------------
     const areaPickNote = areaRepeat && areas.length > 1 ? `Area repeated: ${destination} has fewer distinct live-data zones than trip days.` : '';
-    const breakfast = pickDistinct(dayRestaurants, usedRestaurants, 1, 'breakfast spots');
-    const lunch = pickDistinct(dayRestaurants, usedRestaurants, 1, 'lunch spots');
-    const dinner = pickDistinct(dayRestaurants, usedRestaurants, 1, 'dinner spots');
+    const mealBudget = daily.perDay.food / 3 || 0;
+    const mealResult = mealEngine.assignMealsForDay({
+      restaurants: dayRestaurants,
+      usedRestaurants,
+      dateStr: typeof date === 'string' ? date : (date?.toISOString?.() || ''),
+      foodPreference: prefs?.foodPreference || '',
+      previousActivity: dayAttractions[0] || null,
+      nextActivity: dayAttractions[dayAttractions.length - 1] || null,
+      mealBudget,
+      partySize,
+    });
+    // Track used restaurants globally
+    for (const key of mealResult.usedKeys) {
+      usedRestaurants.add(key);
+    }
+    // Wrap results in pickDistinct-compatible format for downstream code
+    const breakfast = { picks: mealResult.breakfast ? [mealResult.breakfast] : [], notes: [] };
+    const lunch = { picks: mealResult.lunch ? [mealResult.lunch] : [], notes: [] };
+    const dinner = { picks: mealResult.dinner ? [mealResult.dinner] : [], notes: [] };
     // Sunset/beach/viewpoint places are reserved for the evening slot, so the
     // morning + afternoon activities use the rest of the day's area pool.
     // Also filter evening places to prefer those likely open after 17:00.
@@ -678,24 +733,38 @@ export function buildDaysPlan({
 
     // Shared factory for a real place activity.
     // Every activity includes fetchedAt for data source transparency.
-    const placeActivity = ({ time, title, place, description, category, address, coordinates, cost, source, isLive, dataStatus, priority, slot, bookingUrl = '', travel }) => ({
-      time,
-      slot,
-      title,
-      place,
-      description,
-      category,
-      address: address || '',
-      coordinates: coordinates || null,
-      cost: { ...cost },
-      source: source || (isLive ? 'provider' : 'estimate'),
-      bookingUrl,
-      isLive: Boolean(isLive),
-      dataStatus,
-      priority,
-      travel,
-      fetchedAt: NOW_ISO,
-    });
+    // Every activity now includes a strict provenance block for data lineage.
+    const placeActivity = ({ time, title, place, description, category, address, coordinates, cost, source, isLive, dataStatus, priority, slot, bookingUrl = '', travel, provider, providerId }) => {
+      const resolvedDataStatus = dataStatus || (isLive ? 'live' : 'unavailable');
+      let provenance;
+      if (resolvedDataStatus === 'live') {
+        provenance = createProviderProvenance(provider || source || 'unknown', providerId || place || 'unknown', 'live');
+      } else if (resolvedDataStatus === 'estimated') {
+        provenance = createEstimatedProvenance(provider || source || 'system', providerId || 'estimated');
+      } else {
+        provenance = createUnavailableProvenance(provider || source || 'none', 'No reliable provider data available');
+      }
+
+      return {
+        time,
+        slot,
+        title,
+        place,
+        description,
+        category,
+        address: address || '',
+        coordinates: coordinates || null,
+        cost: { ...cost },
+        source: source || (isLive ? 'provider' : 'estimate'),
+        bookingUrl,
+        isLive: Boolean(isLive),
+        dataStatus: resolvedDataStatus,
+        priority,
+        travel,
+        fetchedAt: NOW_ISO,
+        provenance,
+      };
+    };
 
     // ---- Arrival day: outbound transport + check-in ----
     if (isArrival) {
@@ -710,6 +779,8 @@ export function buildDaysPlan({
           cost: { amount: outboundCost, currency, isEstimate: transportLive === false, estimateNote: transportLive ? 'Price from provider' : 'Estimated from transport budget' },
           source: 'provider', isLive: transportLive, dataStatus: transportLive ? 'live' : 'unavailable', priority: 1,
           travel: { distanceKm: 0, durationMin: t.durationMin || 0, method: transportMode, isEstimate: !transportLive },
+          provider: t.provider || 'transport-provider',
+          providerId: t.flightNumber || t.trainNumber || t.bookingId || `transport-${nextSeq()}`,
         }));
       } else if (origin) {
         activities.push(placeActivity({
@@ -721,6 +792,8 @@ export function buildDaysPlan({
           cost: { amount: outboundEstimate, currency, isEstimate: true, estimateNote: 'Estimated from transport budget' },
           source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 1,
           travel: { distanceKm: 0, durationMin: 0, method: 'transport', isEstimate: true },
+          provider: 'none',
+          providerId: `transport-estimate-${nextSeq()}`,
         }));
       }
 
@@ -738,43 +811,52 @@ export function buildDaysPlan({
           cost: { amount: 0, currency: hotel?.price?.currency || currency, isEstimate: true, estimateNote: 'Rate charged on the overnight entry' },
           source: hotelPlan.isLive ? 'amadeus-hotels' : 'budget-estimate', isLive: hotelPlan.isLive,
           dataStatus: hotelPlan.isLive ? 'live' : 'estimate', priority: 1,
+          provider: hotelPlan.isLive ? 'amadeus-hotels' : 'budget-estimate',
+          providerId: hotel.hotelId || hotel.id || `hotel-${nextSeq()}`,
         }));
       } else {
         activities.push(placeActivity({
           time: '12:00', slot: 'hotel',
-          title: `Check-in · Accommodation in ${destination}`,
+          title: 'Live hotel data unavailable',
           place: destination,
-          description: `Live hotel data unavailable or out of budget. Estimated nightly rate allocated from budget (${hotelNightly}/room/night × ${rooms} room(s)).`,
+          description: `No real hotel offers found for ${destination}. Live hotel data unavailable — please book accommodation separately.`,
           category: 'hotel',
-          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'Rate charged on the overnight entry' },
-          source: 'budget-estimate', isLive: false, dataStatus: 'estimate', priority: 1,
+          cost: { amount: 0, currency, isEstimate: false, dataStatus: 'unavailable', estimateNote: 'No provider hotel available' },
+          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 1,
+          provider: 'none',
+          providerId: `hotel-unavailable-${nextSeq()}`,
         }));
       }
     }
 
     // ---- Non-departure day rhythm ----
     if (!isDeparture) {
-      // Breakfast (near hotel)
-      if (breakfast.picks[0]) {
-        const r = breakfast.picks[0];
+      // Breakfast (near hotel) — use meal engine output
+      if (mealResult.breakfast) {
+        const m = mealResult.breakfast;
         activities.push(placeActivity({
           time: '08:00', slot: 'breakfast',
-          title: `Breakfast at ${r.name}`,
-          place: r.name,
-          description: `Start the day right - rating ${r.rating ?? 'n/a'}.${reuseNote(breakfast) ? ` ${reuseNote(breakfast)}` : ''}`,
-          category: 'restaurant', address: r.address || '', coordinates: r.coordinates || null,
-          cost: restaurantMealCost(r, 'breakfast', partySize, currency),
-          source: 'geoapify', isLive: true, dataStatus: 'live', priority: 2,
+          title: m.title,
+          place: m.place,
+          description: m.description,
+          category: 'restaurant', address: m.address || '', coordinates: m.coordinates || null,
+          cost: m.cost,
+          source: m.source, isLive: m.isLive, dataStatus: m.dataStatus, priority: 2,
+          provider: m.source || m.provider || 'restaurant-engine',
+          providerId: m.restaurant?.providerId || m.restaurant?.placeId || m.restaurant?.id || `restaurant-${nextSeq()}`,
         }));
       } else {
+        const fallback = mealEngine.buildUnavailableMeal('breakfast', destination);
         activities.push(placeActivity({
           time: '08:00', slot: 'breakfast',
-          title: 'Breakfast',
-          place: destination,
-          description: 'Breakfast recommendation pending - live data unavailable.',
+          title: fallback.title,
+          place: fallback.place,
+          description: fallback.description,
           category: 'restaurant',
-          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget', source: 'budget-estimate', fetchedAt: NOW_ISO },
-          source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 2,
+          cost: fallback.cost,
+          source: fallback.source, isLive: false, dataStatus: 'unavailable', priority: 2,
+          provider: 'none',
+          providerId: `restaurant-unavailable-${nextSeq()}`,
         }));
       }
 
@@ -799,41 +881,50 @@ export function buildDaysPlan({
           description: `${pick.types?.join(', ') || 'Tourist attraction'}${badWeather && isIndoorPicked ? ' · Indoor plan - rain expected.' : isIndoorPicked ? '' : badWeather ? ' · Consider an indoor alternative if it rains.' : ''}`,
           category: 'attraction', address: pick.address || '', coordinates: pick.coordinates || null,
           cost: attractionCost(pick, currency, partySize),
-          source: 'geoapify', isLive: true, dataStatus: 'live', priority: 1,
+          source: 'google', isLive: true, dataStatus: 'live', priority: 1,
+          provider: 'google',
+          providerId: pick.placeId || pick.id || `attraction-${nextSeq()}`,
         }));
       } else {
         activities.push(placeActivity({
           time: '09:30', slot: 'morning',
-          title: `Explore ${destination}`,
+          title: 'Morning activity',
           place: destination,
-          description: 'Self-guided exploration. Attraction data unavailable - check the Maps & Places pages.',
+          description: 'No validated morning attraction available for this area. Live attraction data unavailable.',
           category: 'attraction',
-          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'Free / unknown entry fee' },
-          source: 'none', isLive: false, dataStatus: 'unavailable', priority: 3,
+          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'No live data available — generic budget estimate, no real price known' },
+          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 3,
+          provider: 'none',
+          providerId: `attraction-unavailable-${nextSeq()}`,
         }));
       }
 
-      // Lunch (near the morning activity's area)
-      if (lunch.picks[0]) {
-        const r = lunch.picks[0];
+      // Lunch (near the morning activity's area) — use meal engine output
+      if (mealResult.lunch) {
+        const m = mealResult.lunch;
         activities.push(placeActivity({
           time: '13:00', slot: 'lunch',
-          title: `Lunch at ${r.name}`,
-          place: r.name,
-          description: `Cuisine match for ${prefs?.foodPreference || 'your preference'}. Rating ${r.rating ?? 'n/a'}.${reuseNote(lunch) ? ` ${reuseNote(lunch)}` : ''}`,
-          category: 'restaurant', address: r.address || '', coordinates: r.coordinates || null,
-          cost: restaurantMealCost(r, 'lunch', partySize, currency),
-          source: 'geoapify', isLive: true, dataStatus: 'live', priority: 1,
+          title: m.title,
+          place: m.place,
+          description: m.description,
+          category: 'restaurant', address: m.address || '', coordinates: m.coordinates || null,
+          cost: m.cost,
+          source: m.source, isLive: m.isLive, dataStatus: m.dataStatus, priority: 1,
+          provider: m.source || m.provider || 'restaurant-engine',
+          providerId: m.restaurant?.providerId || m.restaurant?.placeId || m.restaurant?.id || `restaurant-${nextSeq()}`,
         }));
       } else {
+        const fallback = mealEngine.buildUnavailableMeal('lunch', destination);
         activities.push(placeActivity({
           time: '13:00', slot: 'lunch',
-          title: 'Lunch',
-          place: destination,
-          description: 'Restaurant recommendation pending - live data unavailable. Use the Restaurants page when online.',
+          title: fallback.title,
+          place: fallback.place,
+          description: fallback.description,
           category: 'restaurant',
-          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget', source: 'budget-estimate', fetchedAt: NOW_ISO },
-          source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 2,
+          cost: fallback.cost,
+          source: fallback.source, isLive: false, dataStatus: 'unavailable', priority: 2,
+          provider: 'none',
+          providerId: `restaurant-unavailable-${nextSeq()}`,
         }));
       }
 
@@ -857,17 +948,21 @@ export function buildDaysPlan({
           description: `${a.types?.join(', ') || 'Afternoon activity'}${badWeather && indoorSwap ? ' · Indoor plan - rain expected.' : badWeather ? ' · Consider an indoor alternative if it rains.' : ''}`,
           category: 'attraction', address: a.address || '', coordinates: a.coordinates || null,
           cost: attractionCost(a, currency, partySize),
-          source: 'geoapify', isLive: true, dataStatus: 'live', priority: 1,
+          source: 'google', isLive: true, dataStatus: 'live', priority: 1,
+          provider: 'google',
+          providerId: a.placeId || a.id || `attraction-${nextSeq()}`,
         }));
       } else {
         activities.push(placeActivity({
           time: '14:30', slot: 'afternoon',
-          title: `Leisure time in ${destination}`,
+          title: 'Afternoon activity',
           place: destination,
-          description: 'Free time / self-guided exploration - live attraction data unavailable.',
+          description: 'No validated afternoon attraction available for this area. Live attraction data unavailable.',
           category: 'activity',
-          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'Free' },
-          source: 'none', isLive: false, dataStatus: 'unavailable', priority: 3,
+          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'No live data available — generic budget estimate, no real price known' },
+          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 3,
+          provider: 'none',
+          providerId: `activity-unavailable-${nextSeq()}`,
         }));
       }
 
@@ -881,41 +976,50 @@ export function buildDaysPlan({
           description: `${e.types?.join(', ') || 'Evening activity'} - sunset / local evening.${badWeather ? ' Rain expected - keep an umbrella or move indoors.' : ''}`,
           category: 'activity', address: e.address || '', coordinates: e.coordinates || null,
           cost: attractionCost(e, currency, partySize),
-          source: 'geoapify', isLive: true, dataStatus: 'live', priority: 2,
+          source: 'google', isLive: true, dataStatus: 'live', priority: 2,
+          provider: 'google',
+          providerId: e.placeId || e.id || `activity-${nextSeq()}`,
         }));
       } else {
         activities.push(placeActivity({
           time: '17:30', slot: 'evening',
-          title: `Local evening in ${destination}`,
+          title: 'Evening activity',
           place: destination,
-          description: 'Markets, waterfront or local culture. Details depend on live data availability.',
+          description: 'No validated evening spot available for this area. Live evening data unavailable.',
           category: 'activity',
-          cost: { amount: 0, currency, isEstimate: true },
-          source: 'none', isLive: false, dataStatus: 'unavailable', priority: 3,
+          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'No live data available — generic budget estimate, no real price known' },
+          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 3,
+          provider: 'none',
+          providerId: `activity-unavailable-${nextSeq()}`,
         }));
       }
 
-      // Dinner (near evening activity / accommodation)
-      if (dinner.picks[0]) {
-        const r = dinner.picks[0];
+      // Dinner (near evening activity / accommodation) — use meal engine output
+      if (mealResult.dinner) {
+        const m = mealResult.dinner;
         activities.push(placeActivity({
           time: '20:00', slot: 'dinner',
-          title: `Dinner at ${r.name}`,
-          place: r.name,
-          description: `Rating ${r.rating ?? 'n/a'}. ${prefs?.foodPreference ? `Matches ${prefs.foodPreference} preference.` : ''}${reuseNote(dinner) ? ` ${reuseNote(dinner)}` : ''}`,
-          category: 'restaurant', address: r.address || '', coordinates: r.coordinates || null,
-          cost: restaurantMealCost(r, 'dinner', partySize, currency),
-          source: 'geoapify', isLive: true, dataStatus: 'live', priority: 1,
+          title: m.title,
+          place: m.place,
+          description: m.description,
+          category: 'restaurant', address: m.address || '', coordinates: m.coordinates || null,
+          cost: m.cost,
+          source: m.source, isLive: m.isLive, dataStatus: m.dataStatus, priority: 1,
+          provider: m.source || m.provider || 'restaurant-engine',
+          providerId: m.restaurant?.providerId || m.restaurant?.placeId || m.restaurant?.id || `restaurant-${nextSeq()}`,
         }));
       } else {
+        const fallback = mealEngine.buildUnavailableMeal('dinner', destination);
         activities.push(placeActivity({
           time: '20:00', slot: 'dinner',
-          title: 'Dinner',
-          place: destination,
-          description: 'Dinner recommendation pending - live data unavailable.',
+          title: fallback.title,
+          place: fallback.place,
+          description: fallback.description,
           category: 'restaurant',
-          cost: { amount: Math.round((daily.perDay.food / 3) * 100) / 100, currency, isEstimate: true, estimateNote: 'Estimated from food budget', source: 'budget-estimate', fetchedAt: NOW_ISO },
-          source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 2,
+          cost: fallback.cost,
+          source: fallback.source, isLive: false, dataStatus: 'unavailable', priority: 2,
+          provider: 'none',
+          providerId: `restaurant-unavailable-${nextSeq()}`,
         }));
       }
 
@@ -930,7 +1034,9 @@ export function buildDaysPlan({
           description: `${n.types?.join(', ') || 'Night market, live music or local entertainment'} (nightlife live data unavailable - local attraction used)`,
           category: 'activity', address: n.address || '', coordinates: n.coordinates || null,
           cost: attractionCost(n, currency, partySize),
-          source: 'geoapify', isLive: true, dataStatus: 'live', priority: 3,
+          source: 'google', isLive: true, dataStatus: 'live', priority: 3,
+          provider: 'google',
+          providerId: n.placeId || n.id || `nightlife-${nextSeq()}`,
         }));
       } else if (nightPick.picks[0]) {
         const n = nightPick.picks[0];
@@ -941,17 +1047,21 @@ export function buildDaysPlan({
           description: `${n.types?.join(', ') || 'Night market, live music or local entertainment'}${badWeather ? ' · Weather may affect open-air venues.' : ''}`,
           category: 'activity', address: n.address || '', coordinates: n.coordinates || null,
           cost: attractionCost(n, currency, partySize),
-          source: 'geoapify', isLive: true, dataStatus: 'live', priority: 3,
+          source: 'google', isLive: true, dataStatus: 'live', priority: 3,
+          provider: 'google',
+          providerId: n.placeId || n.id || `nightlife-${nextSeq()}`,
         }));
       } else {
         activities.push(placeActivity({
           time: '21:30', slot: 'night',
-          title: `Local night life near ${area.name}`,
+          title: 'Night activity',
           place: destination,
-          description: 'Evening market, night view or local entertainment - live data unavailable, confirm locally.',
+          description: 'No nightlife or evening attraction data available for this area.',
           category: 'activity',
-          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'Free / varies' },
-          source: 'none', isLive: false, dataStatus: 'unavailable', priority: 3,
+          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'No live data available — generic budget estimate, no real price known' },
+          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 3,
+          provider: 'none',
+          providerId: `nightlife-unavailable-${nextSeq()}`,
         }));
       }
 
@@ -960,47 +1070,69 @@ export function buildDaysPlan({
         activities.push(placeActivity({
           time: '19:15', slot: 'transport',
           title: 'Local transport & transfers',
-          place: `${area.name}, ${destination}`,
-          description: 'Estimated local fares for intra-day movement (walking/taxi/bus).',
+          place: destination,
+          description: 'Budget allocation for local transport (walking/taxi/bus). Actual fares vary.',
           category: 'transport',
           cost: { amount: localTransportPerDay, currency, isEstimate: true, estimateNote: 'Estimated from transport budget' },
           source: 'budget-estimate', isLive: false, dataStatus: 'estimate', priority: 2,
+          provider: 'budget-estimate',
+          providerId: `transport-estimate-${nextSeq()}`,
         }));
       }
 
       // Overnight at hotel (charge per night, per room)
-      activities.push(placeActivity({
-        time: '22:30', slot: 'hotel',
-        title: hotel ? `Overnight at ${hotel.name}` : `Overnight in ${destination}`,
-        place: hotel?.name || destination,
-        description: `Rest and recharge. ${hotel ? `Price ${hotelNightly}/room/night × ${rooms} room(s)${hotelPlan.notes ? ` - ${hotelPlan.notes}` : ''}.` : ''}`,
-        category: 'hotel',
-        address: hotel?.address || '',
-        coordinates: hotel?.latitude != null ? { lat: Number(hotel.latitude), lng: Number(hotel.longitude) } : null,
-        cost: {
-          amount: Math.round(hotelNightly * rooms * 100) / 100,
-          currency: hotel?.price?.currency || currency,
-          isEstimate: !hotelPlan.isLive,
-          perPerson: Math.round((hotelNightly * rooms) / partySize * 100) / 100,
-          estimateNote: hotelPlan.isLive ? `Live price · ${hotelNightly}/room/night × ${rooms} room(s)` : `Estimated ${hotelNightly}/room/night × ${rooms} room(s)`,
-        },
-        source: hotelPlan.isLive ? 'amadeus-hotels' : 'budget-estimate', isLive: hotelPlan.isLive,
-        dataStatus: hotelPlan.isLive ? 'live' : 'estimate', priority: 1,
-      }));
+      if (hotel && hotelNightly != null) {
+        activities.push(placeActivity({
+          time: '22:30', slot: 'hotel',
+          title: `Overnight at ${hotel.name}`,
+          place: hotel.name,
+          description: `Rest and recharge. Price ${hotelNightly}/room/night × ${rooms} room(s)${hotelPlan.notes ? ` - ${hotelPlan.notes}` : ''}.`,
+          category: 'hotel',
+          address: hotel.address || '',
+          coordinates: hotel.latitude != null ? { lat: Number(hotel.latitude), lng: Number(hotel.longitude) } : null,
+          cost: {
+            amount: Math.round(hotelNightly * rooms * 100) / 100,
+            currency: hotel.price?.currency || currency,
+            isEstimate: !hotelPlan.isLive,
+            perPerson: Math.round((hotelNightly * rooms) / partySize * 100) / 100,
+            estimateNote: hotelPlan.isLive ? `Live price · ${hotelNightly}/room/night × ${rooms} room(s)` : `Price · ${hotelNightly}/room/night × ${rooms} room(s)`,
+          },
+          source: hotelPlan.isLive ? 'amadeus-hotels' : 'provider', isLive: hotelPlan.isLive,
+          dataStatus: hotelPlan.isLive ? 'live' : 'estimate', priority: 1,
+          provider: hotelPlan.isLive ? 'amadeus-hotels' : 'budget-estimate',
+          providerId: hotel.hotelId || hotel.id || `hotel-${nextSeq()}`,
+        }));
+      } else {
+        activities.push(placeActivity({
+          time: '22:30', slot: 'hotel',
+          title: 'Live hotel data unavailable',
+          place: destination,
+          description: 'No real hotel offers found — overnight accommodation not included in this itinerary.',
+          category: 'hotel',
+          address: '',
+          coordinates: null,
+          cost: { amount: 0, currency, isEstimate: false, dataStatus: 'unavailable', estimateNote: 'No provider hotel available' },
+          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 1,
+          provider: 'none',
+          providerId: `hotel-unavailable-${nextSeq()}`,
+        }));
+      }
     }
 
     // ---- Departure day: check-out + return travel ----
     if (isDeparture) {
       activities.push(placeActivity({
         time: '09:00', slot: 'hotel',
-        title: `Check out · depart ${destination}`,
-        place: hotel?.name || destination,
-        description: 'Departure day - pack up and check out of your accommodation.',
+        title: hotel?.name ? `Check out · ${hotel.name}` : 'Check out',
+        place: hotel?.name || '',
+        description: hotel?.name ? 'Departure day - pack up and check out.' : 'Departure day - no hotel booking on record.',
         category: 'hotel',
         address: hotel?.address || '',
         coordinates: hotel?.latitude != null ? { lat: Number(hotel.latitude), lng: Number(hotel.longitude) } : null,
-        cost: { amount: 0, currency, isEstimate: true },
-        source: 'none', isLive: false, dataStatus: 'estimate', priority: 1,
+        cost: { amount: 0, currency, isEstimate: false, dataStatus: hotel?.name ? 'estimate' : 'unavailable', estimateNote: 'Administrative event - no charge' },
+        source: hotel?.name ? 'budget-estimate' : 'unavailable', isLive: false, dataStatus: hotel?.name ? 'estimate' : 'unavailable', priority: 1,
+        provider: hotel?.name ? 'budget-estimate' : 'none',
+        providerId: hotel?.hotelId || hotel?.id || `hotel-checkout-${nextSeq()}`,
       }));
       if (origin) {
         // Use real return transport data when available
@@ -1021,6 +1153,8 @@ export function buildDaysPlan({
             cost: { amount: returnPrice, currency, isEstimate: !returnIsLive, estimateNote: returnIsLive ? 'Price from provider' : 'Estimated from transport budget' },
             source: returnIsLive ? 'provider' : 'budget-estimate', isLive: returnIsLive, dataStatus: returnIsLive ? 'live' : 'unavailable', priority: 1,
             travel: { distanceKm: 0, durationMin: 0, method: returnMode, isEstimate: !returnIsLive },
+            provider: returnRec.source || 'transport-provider',
+            providerId: returnRec.bookingId || returnRec.flightNumber || `return-transport-${nextSeq()}`,
           }));
         } else {
           // Fallback: no live return transport data
@@ -1032,6 +1166,8 @@ export function buildDaysPlan({
             category: 'transport',
             cost: { amount: returnEstimate, currency, isEstimate: true, estimateNote: 'Estimated from transport budget' },
             source: 'budget-estimate', isLive: false, dataStatus: 'unavailable', priority: 1,
+            provider: 'none',
+            providerId: `return-transport-unavailable-${nextSeq()}`,
           }));
         }
       }
@@ -1072,17 +1208,17 @@ export function buildDaysPlan({
     // A 1-day trip has zero nights - no overnight charge, just a day-use stay.
     const overnightNights = nights === 0 ? 0 : isDeparture ? 0 : 1;
     const overnight = {
-      name: hotel?.name || `${destination} (estimated accommodation)`,
+      name: hotel?.name || null,
       area: hotel ? localityOf(hotel) || area.name : area.name,
       rooms,
       nights: overnightNights,
       pricePerRoomNight: hotelNightly,
-      total: Math.round(hotelNightly * overnightNights * rooms * 100) / 100,
+      total: hotelNightly != null ? Math.round(hotelNightly * overnightNights * rooms * 100) / 100 : 0,
       address: hotel?.address || '',
       rating: hotel?.rating ?? null,
       amenities: Array.isArray(hotel?.amenities) ? hotel.amenities : [],
       isLive: hotelPlan.isLive && Boolean(hotel),
-      source: hotelPlan.isLive ? 'amadeus-hotels' : 'budget-estimate',
+      source: hotel ? (hotelPlan.isLive ? 'amadeus-hotels' : 'provider') : 'unavailable',
       notes: hotelPlan.notes || '',
     };
 
@@ -1121,6 +1257,14 @@ export function buildDaysPlan({
   // to repeat (same hotel for multi-night stay). Restaurants and attractions
   // should NOT repeat.
   validateNoDuplicateAttractions(days);
+
+  // ---- Provenance validation ----
+  // Ensure every activity has a valid provenance block for data lineage
+  for (const day of days) {
+    for (const activity of (day.activities || [])) {
+      ensureProvenance(activity);
+    }
+  }
 
   // ---- Hard budget enforcement (before returning, so the stored total is
   //      always <= the user's budget when a budget was provided) ----
@@ -1585,7 +1729,7 @@ export function buildItineraryExtras({
     hotels.push(...activityHotels.slice(0, 6));
   }
 
-  /* ---- 4. Restaurants (from Geoapify Places, or itinerary activity fallback) ---- */
+  /* ---- 4. Restaurants (from Google Places, or itinerary activity fallback) ---- */
   const restaurantList = Array.isArray(restaurantResult?.data?.restaurants) ? restaurantResult.data.restaurants : [];
   const restaurantsLive = restaurantResult?.data?.isLive === true;
   const restaurants = restaurantList.slice(0, 8).map((r) => {
@@ -1601,7 +1745,7 @@ export function buildItineraryExtras({
       averageCostIsEstimate: !hasZomato,
       averageCostNote: hasZomato
         ? `Real average from Zomato (${r.zomatoData.ratingText || 'rated'} ${r.zomatoData.rating ?? ''})`
-        : 'Estimated from Geoapify priceLevel — actual menu prices not available from provider',
+        : 'Estimated from Google Places priceLevel — actual menu prices not available from provider',
       veg: Boolean(prefs?.foodPreference && /veg|jain|vegan/i.test(prefs.foodPreference)),
       nonVeg: Boolean(prefs?.foodPreference && /non.?veg|chicken|meat|seafood/i.test(prefs.foodPreference)),
       vegan: Boolean(prefs?.foodPreference && /vegan|jain/i.test(prefs.foodPreference)),
@@ -1611,7 +1755,7 @@ export function buildItineraryExtras({
       address: r.address || '',
       coordinates: r.coordinates || null,
       isLive: restaurantsLive,
-      source: hasZomato ? 'zomato' : 'geoapify',
+      source: hasZomato ? 'zomato' : 'google',
     };
   });
   // Fallback: use restaurant data extracted from itinerary activities
@@ -1636,7 +1780,7 @@ export function buildItineraryExtras({
     rating: a.rating ?? null,
     entryFee: (a.entryFee && typeof a.entryFee.amount === 'number') ? a.entryFee : entryFeeEstimate(a, currency),
     entryFeeIsEstimate: a.entryFee ? (a.entryFee.isEstimate !== false) : true,
-    entryFeeNote: a.entryFeeNote || (a.entryFee ? 'From itinerary plan' : 'Estimated — no live entry fee pricing available from Geoapify provider'),
+    entryFeeNote: a.entryFeeNote || (a.entryFee ? 'From itinerary plan' : 'Estimated — no live entry fee pricing available from Google provider'),
     openingHours: a.openingHours || null,
     timeRequired: a.timeRequired || visitHoursEstimate(a),
     distanceKm: attractionKm(a),
@@ -1644,7 +1788,7 @@ export function buildItineraryExtras({
     types: (a.types || []).slice(0, 3),
     address: a.address || '',
     isLive: a.isLive || attractionsLive,
-    source: a.source || 'geoapify',
+    source: a.source || 'google',
   });
   const topAttractions = effectiveAttractionList.slice(0, 6).map(attractionCard);
   const nearbyAttractions = effectiveAttractionList.slice(0, 10).map(attractionCard);

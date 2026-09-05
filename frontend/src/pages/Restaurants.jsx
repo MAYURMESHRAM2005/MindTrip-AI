@@ -14,7 +14,7 @@ import { haversineKm } from '../utils/geo';
 import toast from 'react-hot-toast';
 import { useI18n } from '../utils/i18n';
 
-/** Distance from the search city center (Geoapify reports it from the bias point). */
+/** Distance from the search city center (Google Places reports it from the bias point). */
 function distanceFromCenterKm(restaurant, center) {
   if (!center || !restaurant?.coordinates) return null;
   if (restaurant.distanceMeters != null) return restaurant.distanceMeters / 1000;
@@ -83,7 +83,7 @@ export default function Restaurants() {
 
   return (
     <div>
-      <PageHeader icon={UtensilsCrossed} title={t('Restaurants')} subtitle={t('Real Geoapify Places data with food-preference filters.')} />
+      <PageHeader icon={UtensilsCrossed} title={t('Restaurants')} subtitle={t('Real Google Places data with food-preference filters.')} />
 
       <div className="card mb-6 p-5">
         <div className="flex flex-wrap items-end gap-3">
@@ -138,13 +138,13 @@ export default function Restaurants() {
       {isLoading && <div className="flex justify-center py-12"><Spinner size="lg" /></div>}
 
       {data && !data.isLive && (
-        <ProviderNotice title={t('Live restaurant data unavailable')} message={data.message} externalSources={[{ name: 'OpenStreetMap', url: 'https://www.openstreetmap.org' }, { name: 'Zomato', url: 'https://www.zomato.com' }]} />
+        <ProviderNotice title={t('Live restaurant data unavailable')} message={data.message} externalSources={[{ name: 'Google Maps', url: 'https://maps.google.com' }, { name: 'Zomato', url: 'https://www.zomato.com' }]} />
       )}
 
       {data?.isLive && (
         <>
           <p className="mb-3 text-xs font-semibold text-emerald-600">
-            ● {t('Live from Geoapify Places')}
+            ● {t('Live from Google Places')}
             {nearby ? (
               <span className="text-slate-500"> · {t('near your location')}</span>
             ) : data.searchedCity ? (

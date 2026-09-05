@@ -10,7 +10,10 @@ import { I18nProvider } from './utils/i18n';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      // Retry transient failures once, but NEVER retry HTTP 429 quota errors.
+      // Retrying a RESOURCE_EXHAUSTED response doubles the Google API calls
+      // and burns the daily quota faster — it never succeeds.
+      retry: (failureCount, error) => failureCount < 1 && error?.response?.status !== 429,
       refetchOnWindowFocus: false,
       staleTime: 30000,
     },

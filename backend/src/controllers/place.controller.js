@@ -1,6 +1,6 @@
 import ApiResponse from '../utils/ApiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import placesProvider from '../providers/places.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
 import geminiService from '../services/gemini.service.js';
 import SavedPlace from '../models/SavedPlace.js';
 

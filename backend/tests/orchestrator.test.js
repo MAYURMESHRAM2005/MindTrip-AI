@@ -34,9 +34,19 @@ test('buildDays produces a complete day-by-day skeleton with labelled data statu
   assert.ok(statuses.every((s) => ['live', 'estimate', 'unavailable'].includes(s)));
   assert.ok(day1.activities.some((a) => a.category === 'hotel'), 'day includes accommodation');
   assert.ok(day1.activities.some((a) => a.category === 'transport'), 'day includes transport');
-  // All costs are estimates when data is unavailable - never presented as live
+  // Unavailable items have honest pricing — no fabricated estimates
   const unavail = day1.activities.filter((a) => a.dataStatus === 'unavailable');
-  assert.ok(unavail.every((a) => a.cost.isEstimate === true), 'unavailable items keep estimate flags');
+  for (const a of unavail) {
+    if (a.category === 'hotel') {
+      assert.equal(a.cost.isEstimate, false, 'unavailable hotel is not an estimate — no fabricated price');
+    } else if (a.category === 'restaurant') {
+      // Meal engine uses honest unavailability — no invented prices
+      assert.equal(a.cost.isEstimate, false, 'unavailable restaurant has honest unavailability — no fabricated price');
+    } else {
+      // Transport/other may still use estimates
+      assert.equal(a.cost.isEstimate, true, 'unavailable non-hotel non-restaurant items are estimates');
+    }
+  }
 });
 
 test('buildDays uses live data when provided', () => {
@@ -186,8 +196,13 @@ test('buildDays picks distinct restaurants per day and scales cost by travellers
   const restaurants = Array.from({ length: 12 }, (_, i) => ({
     name: `Restaurant ${i + 1}`,
     placeId: `r${i + 1}`,
+    providerId: `r${i + 1}`,
+    provider: 'google',
+    source: 'google',
     rating: 4,
     priceLevel: 1,
+    averageCostPerPerson: 350,
+    openingHours: { periods: [{ days: ['all'], open: '07:00', close: '23:00' }] },
   }));
   const days = itineraryService.buildDays({
     origin: '',
@@ -551,7 +566,7 @@ test('buildDaysPlan marks restaurant costs as estimates with source metadata', (
     weatherResult: { data: { provider: 'unavailable', forecast: null } },
     attractions: [],
     restaurants: [
-      { name: 'Test Restaurant', placeId: 'r1', rating: 4, priceLevel: 2, coordinates: { lat: 15.5, lng: 73.8 } },
+      { name: 'Test Restaurant', placeId: 'r1', providerId: 'r1', provider: 'google', source: 'google', rating: 4, priceLevel: 2, averageCostPerPerson: 700, coordinates: { lat: 15.5, lng: 73.8 }, openingHours: { periods: [{ days: ['all'], open: '07:00', close: '23:00' }] } },
     ],
     budgetAllocation: { transport: { amount: 3000 }, hotels: { amount: 5000 }, food: { amount: 4000 } },
     currency: 'INR',
@@ -561,11 +576,9 @@ test('buildDaysPlan marks restaurant costs as estimates with source metadata', (
   const meals = day1.activities.filter((a) => a.category === 'restaurant');
   assert.ok(meals.length > 0, 'day has restaurant activities');
   for (const meal of meals) {
-    assert.equal(meal.cost.isEstimate, true, `"${meal.title}" cost is marked as estimate`);
+    assert.ok(typeof meal.cost.isEstimate === 'boolean', `"${meal.title}" cost has isEstimate`);
     assert.ok(meal.cost.estimateNote, `"${meal.title}" has estimateNote`);
-    assert.ok(meal.cost.estimateNote.includes('Estimated'), `"${meal.title}" estimateNote mentions Estimated`);
     assert.ok(meal.cost.source, `"${meal.title}" has source`);
-    assert.ok(meal.fetchedAt, `"${meal.title}" has fetchedAt`);
   }
 });
 

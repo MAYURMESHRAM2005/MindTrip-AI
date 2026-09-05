@@ -14,6 +14,13 @@ import logger from '../utils/logger.js';
 import { generateItinerary, getRequestCount } from '../services/itineraryGenerator.service.js';
 import finalValidatorAgent from '../agents/finalValidator.agent.js';
 import { haversineKm } from '../utils/geo.js';
+import destinationLock from '../services/destinationLock.service.js';
+import candidateQuality from '../services/candidateQuality.service.js';
+import restaurantPipeline from '../services/restaurantCandidatePipeline.service.js';
+import hotelPipeline from '../services/hotelCandidatePipeline.service.js';
+import uniquenessEngine from '../services/uniquenessEngine.service.js';
+import dayAwareProvider from '../services/dayAwareProvider.service.js';
+import geoClustering from '../services/geographicClustering.service.js';
 
 const MAX_REPLAN_ATTEMPTS = 3;
 
@@ -31,11 +38,11 @@ const MAX_REPLAN_ATTEMPTS = 3;
 export function normalizeCandidates({ attractions, restaurants, nightlife, hotelResult, transportResult, eventsResult }) {
   const candidates = [];
 
-  // Attractions (from Geoapify + Viator enrichment)
+  // Attractions (from Google + Viator enrichment)
   for (const a of attractions || []) {
     candidates.push({
-      id: `geoapify:${a.placeId || a.name}`,
-      provider: 'geoapify',
+      id: `google:${a.placeId || a.name}`,
+      provider: 'google',
       providerId: a.placeId || a.name,
       type: 'attraction',
       name: a.name || '',
@@ -51,7 +58,7 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       availability: a.dataStatus || 'estimate',
       bookingUrl: a.bookingUrl || '',
       imageUrl: a.imageUrl || '',
-      source: 'geoapify',
+      source: 'google',
       isLive: Boolean(a.isLive),
       isEstimate: Boolean(a.entryFee?.isEstimate ?? true),
       // Preserve enriched fields
@@ -64,45 +71,52 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
     });
   }
 
-  // Restaurants (from Geoapify + Zomato enrichment)
-  for (const r of restaurants || []) {
+  // Restaurants — run through strict restaurant pipeline first
+  const restaurantPipelineResult = restaurantPipeline.runRestaurantPipeline(restaurants || []);
+  if (restaurantPipelineResult.rejected.length > 0) {
+    logger.info(`[AI-PLANNING] Restaurant pipeline: ${restaurantPipelineResult.accepted.length} accepted, ${restaurantPipelineResult.rejected.length} rejected`);
+    for (const r of restaurantPipelineResult.rejectionLog) {
+      logger.warn(`[AI-PLANNING] Restaurant REJECTED: "${r.name}" — ${r.rejection}`);
+    }
+  }
+  for (const r of restaurantPipelineResult.accepted) {
     candidates.push({
-      id: `geoapify:${r.placeId || r.name}`,
-      provider: 'geoapify',
-      providerId: r.placeId || r.name,
+      id: `restaurant:${r.providerId || r.canonicalName}`,
+      provider: r.provider,
+      providerId: r.providerId,
       type: 'restaurant',
-      name: r.name || '',
-      description: (r.cuisines || r.types || []).join(', '),
-      latitude: r.coordinates?.lat || null,
-      longitude: r.coordinates?.lng || null,
+      name: r.canonicalName,
+      description: (r.cuisine || []).join(', '),
+      latitude: r.latitude,
+      longitude: r.longitude,
       price: r.averageCostPerPerson || 0,
       currency: 'INR',
-      rating: r.rating || null,
-      priceLevel: r.priceLevel || null,
-      openingHours: r.openingHours || null,
+      rating: r.rating,
+      priceLevel: r.priceLevel,
+      openingHours: r.openingHours,
       duration: null,
-      availability: r.dataStatus || 'estimate',
-      bookingUrl: r.bookingUrl || '',
-      imageUrl: r.imageUrl || '',
-      source: 'geoapify',
-      isLive: Boolean(r.isLive),
-      isEstimate: Boolean(r.zomatoData?.averageCostPerPerson ? false : true),
-      // Preserve Zomato enrichment
-      zomatoData: r.zomatoData || null,
-      averageCostPerPerson: r.averageCostPerPerson || r.zomatoData?.averageCostPerPerson || null,
-      averageCostForTwo: r.averageCostForTwo || r.zomatoData?.averageCostForTwo || null,
-      cuisines: r.cuisines || r.zomatoData?.cuisines || [],
-      types: r.types || [],
-      address: r.address || '',
-      suburb: r.suburb || '',
+      availability: r.dataStatus,
+      bookingUrl: '',
+      imageUrl: '',
+      source: r.source,
+      isLive: r.dataStatus === 'live',
+      isEstimate: r.isEstimate,
+      averageCostPerPerson: r.averageCostPerPerson,
+      cuisines: r.cuisine,
+      types: [],
+      address: r.address,
+      suburb: r.city || '',
+      // Pipeline metadata
+      _pipelineNormalized: true,
+      _dataStatus: r.dataStatus,
     });
   }
 
   // Nightlife
   for (const n of nightlife || []) {
     candidates.push({
-      id: `geoapify:${n.placeId || n.name}`,
-      provider: 'geoapify',
+      id: `google:${n.placeId || n.name}`,
+      provider: 'google',
       providerId: n.placeId || n.name,
       type: 'nightlife',
       name: n.name || '',
@@ -117,7 +131,7 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       availability: 'estimate',
       bookingUrl: '',
       imageUrl: '',
-      source: 'geoapify',
+      source: 'google',
       isLive: Boolean(n.isLive),
       isEstimate: true,
       types: n.types || [],
@@ -125,60 +139,57 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
     });
   }
 
-  // Hotel (from Amadeus)
-  const hotel = hotelResult?.data?.recommended;
-  if (hotel) {
-    candidates.push({
-      id: `amadeus:${hotel.name}`,
-      provider: 'amadeus',
-      providerId: hotel.name || 'recommended-hotel',
-      type: 'hotel',
-      name: hotel.name || '',
-      description: hotel.address || '',
-      latitude: hotel.latitude || null,
-      longitude: hotel.longitude || null,
-      price: hotel.price?.amount || 0,
-      pricePerNight: hotel.price?.amount || 0,
-      currency: hotel.price?.currency || 'INR',
-      rating: hotel.rating || null,
-      openingHours: null,
-      duration: null,
-      availability: hotelResult.data.isLive ? 'live' : 'estimate',
-      bookingUrl: hotel.bookingUrl || '',
-      imageUrl: hotel.imageUrl || '',
-      source: 'amadeus-hotels',
-      isLive: Boolean(hotelResult.data.isLive),
-      isEstimate: Boolean(!hotelResult.data.isLive),
-      amenities: hotel.amenities || [],
-      address: hotel.address || '',
-    });
+  // Hotels — run through strict hotel pipeline
+  const allHotelRaw = [];
+  const hotelRecommended = hotelResult?.data?.recommended;
+  if (hotelRecommended && hotelRecommended.name) {
+    allHotelRaw.push(hotelRecommended);
   }
-  // Additional hotels from the list
   for (const h of (hotelResult?.data?.hotels || []).slice(0, 10)) {
-    if (h.name === hotel?.name) continue; // Skip duplicate
+    if (h.name && h.name !== hotelRecommended?.name) {
+      allHotelRaw.push(h);
+    }
+  }
+  const hotelPipelineResult = hotelPipeline.runHotelPipeline(allHotelRaw, {
+    checkIn: '', checkOut: '', rooms: 1, destination: '',
+  });
+  if (hotelPipelineResult.rejected.length > 0) {
+    logger.info(`[AI-PLANNING] Hotel pipeline: ${hotelPipelineResult.accepted.length} accepted, ${hotelPipelineResult.rejected.length} rejected`);
+    for (const r of hotelPipelineResult.rejectionLog) {
+      logger.warn(`[AI-PLANNING] Hotel REJECTED: "${r.name}" — ${r.rejection}`);
+    }
+  }
+  for (const h of hotelPipelineResult.accepted) {
     candidates.push({
-      id: `amadeus:${h.name}`,
-      provider: 'amadeus',
-      providerId: h.name || `hotel-${Math.random()}`,
+      id: `hotel:${h.hotelId || h.hotelName}`,
+      provider: h.provider,
+      providerId: h.hotelId || h.hotelName,
       type: 'hotel',
-      name: h.name || '',
+      name: h.hotelName,
       description: h.address || '',
-      latitude: h.latitude || null,
-      longitude: h.longitude || null,
-      price: h.price?.amount || 0,
-      pricePerNight: h.price?.amount || 0,
-      currency: h.price?.currency || 'INR',
-      rating: h.rating || null,
+      latitude: h.latitude,
+      longitude: h.longitude,
+      price: h.pricePerNight || 0,
+      pricePerNight: h.pricePerNight || 0,
+      currency: h.currency || 'INR',
+      rating: h.rating,
       openingHours: null,
       duration: null,
-      availability: hotelResult.data.isLive ? 'live' : 'estimate',
-      bookingUrl: h.bookingUrl || '',
-      imageUrl: h.imageUrl || '',
-      source: 'amadeus-hotels',
-      isLive: Boolean(hotelResult.data.isLive),
-      isEstimate: Boolean(!hotelResult.data.isLive),
-      amenities: h.amenities || [],
-      address: h.address || '',
+      availability: h.dataStatus,
+      bookingUrl: '',
+      imageUrl: '',
+      source: h.source,
+      isLive: h.dataStatus === 'live',
+      isEstimate: h.isEstimate,
+      amenities: [],
+      address: h.address,
+      // Pipeline metadata
+      _pipelineNormalized: true,
+      _dataStatus: h.dataStatus,
+      _totalPrice: h.totalPrice,
+      _checkIn: h.checkIn,
+      _checkOut: h.checkOut,
+      _rooms: h.rooms,
     });
   }
 
@@ -424,17 +435,32 @@ function mapPeriod(startTime) {
 
 /** Build cost object from candidate data. */
 function buildCostFromCandidate(candidate, type) {
-  // Hotels: nightly rate from candidate
+  // Hotels: nightly rate from candidate — never fabricate a price
   if (type === 'hotel') {
-    if (candidate.pricePerNight > 0) {
+    const pricePerNight = candidate.pricePerNight || candidate.price || 0;
+    if (pricePerNight > 0) {
+      const isEstimate = Boolean(candidate.isEstimate);
+      const dataStatus = candidate._dataStatus || candidate.availability || (candidate.isLive ? 'live' : (isEstimate ? 'estimate' : 'unavailable'));
       return {
-        amount: candidate.pricePerNight,
+        amount: pricePerNight,
         currency: candidate.currency || 'INR',
-        isEstimate: Boolean(candidate.isEstimate),
+        isEstimate,
         source: candidate.source || candidate.provider,
+        dataStatus,
+        estimateNote: dataStatus === 'live'
+          ? `Live price from ${candidate.source || candidate.provider}`
+          : `Price from ${candidate.source || candidate.provider}`,
       };
     }
-    return { amount: 0, currency: 'INR', isEstimate: true, source: 'budget-estimate' };
+    // No provider price available — do NOT invent a price
+    return {
+      amount: null,
+      currency: candidate.currency || 'INR',
+      isEstimate: false,
+      source: candidate.source || candidate.provider || 'unavailable',
+      dataStatus: 'unavailable',
+      estimateNote: 'No provider price available — not fabricated',
+    };
   }
 
   // Transport: price from candidate
@@ -447,7 +473,15 @@ function buildCostFromCandidate(candidate, type) {
         source: candidate.source || candidate.provider,
       };
     }
-    return { amount: 0, currency: 'INR', isEstimate: true, source: 'budget-estimate' };
+    // No provider price available — do NOT fabricate a price
+    return {
+      amount: null,
+      currency: candidate.currency || 'INR',
+      isEstimate: false,
+      source: candidate.source || candidate.provider || 'unavailable',
+      dataStatus: 'unavailable',
+      estimateNote: 'No provider price available — not fabricated',
+    };
   }
 
   // Attractions: entry fee from candidate
@@ -465,20 +499,34 @@ function buildCostFromCandidate(candidate, type) {
   }
 
   // Restaurants: average cost from candidate
+  // Price rule: use provider value if available; if not, price=null, dataStatus=unavailable
   if (type === 'restaurant') {
     const cost = candidate.averageCostPerPerson || candidate.price || 0;
     if (cost > 0) {
+      const isEstimate = Boolean(candidate.isEstimate);
+      const dataStatus = candidate._dataStatus || candidate.availability || (candidate.isLive ? 'live' : (isEstimate ? 'estimate' : 'unavailable'));
       return {
         amount: cost,
         currency: candidate.currency || 'INR',
-        isEstimate: Boolean(candidate.isEstimate),
+        isEstimate,
         source: candidate.source || candidate.provider,
-        estimateNote: candidate.hasZomatoData
-          ? `Real average from Zomato × party size`
-          : `Estimated from ${candidate.provider} priceLevel`,
+        dataStatus,
+        estimateNote: dataStatus === 'live'
+          ? `Real price from ${candidate.source || candidate.provider}`
+          : isEstimate
+            ? `Estimated from ${candidate.provider} priceLevel — labeled as estimate`
+            : `Price from ${candidate.source || candidate.provider}`,
       };
     }
-    return { amount: 0, currency: 'INR', isEstimate: true, source: 'budget-estimate' };
+    // No provider price available — do NOT invent a price
+    return {
+      amount: null,
+      currency: candidate.currency || 'INR',
+      isEstimate: false,
+      source: candidate.source || candidate.provider || 'unavailable',
+      dataStatus: 'unavailable',
+      estimateNote: 'No provider price available — not fabricated',
+    };
   }
 
   // Events: price from candidate
@@ -602,16 +650,116 @@ export async function runAIPlanningPipeline(opts) {
     eventsResult, weatherResult, trafficResult, guideResult, safetyResult,
     prefs, destination, origin, startDate, endDate, travelers, totalBudget,
     currency, daysCount, nightsCount, allocation, totalEstimatedCost,
-    isOverBudget, existingDaysPlan, userId, routeCache,
+    isOverBudget, existingDaysPlan, userId, routeCache, destLock,
   } = opts;
 
   const started = Date.now();
   logger.info('[AI-PLANNING] Starting AI planning pipeline');
 
   // ═══ STEP 1: Normalize candidates ═══
-  const candidates = normalizeCandidates({
+  let candidates = normalizeCandidates({
     attractions, restaurants, nightlife, hotelResult, transportResult, eventsResult,
   });
+
+  // ═══ STEP 1b: Destination Lock — filter candidates against boundary ═══
+  if (destLock && candidates.length) {
+    const beforeCount = candidates.length;
+    const { accepted, rejected, rejectionLog } = destinationLock.filterCandidates(
+      candidates, destLock, 'ai-planning'
+    );
+    candidates = accepted;
+    if (rejected.length > 0) {
+      logger.info(`[DESTINATION-LOCK] AI Planning candidates: ${accepted.length} accepted, ${rejected.length} rejected (from ${beforeCount})`);
+      for (const r of rejectionLog) {
+        logger.warn(`[DESTINATION-LOCK] AI REJECTED: "${r.candidate.name}" — ${r.reason}`);
+      }
+    }
+  }
+
+  // ═══ STEP 1c: Candidate Quality — filter low-quality candidates ═══
+  if (candidates.length) {
+    const beforeCount = candidates.length;
+    const qualityFiltered = [];
+    const qualityRejections = [];
+    // Group candidates by type and filter each group
+    const byType = new Map();
+    for (const c of candidates) {
+      const t = c.type || 'attraction';
+      if (!byType.has(t)) byType.set(t, []);
+      byType.get(t).push(c);
+    }
+    for (const [type, group] of byType) {
+      const { accepted, rejected, rejectionLog } = candidateQuality.filterByQuality(
+        group, type, 'ai-planning'
+      );
+      qualityFiltered.push(...accepted);
+      qualityRejections.push(...rejectionLog);
+    }
+    candidates = qualityFiltered;
+    if (qualityRejections.length > 0) {
+      logger.info(`[CANDIDATE-QUALITY] AI Planning: ${candidates.length} accepted, ${qualityRejections.length} rejected (from ${beforeCount})`);
+    }
+  }
+
+  // ═══ STEP 1d: Uniqueness Engine — build global candidate pool and deduplicate ═══
+  const candidatePool = uniquenessEngine.buildCandidatePool({
+    attractions: candidates.filter(c => c.type === 'attraction'),
+    restaurants: candidates.filter(c => c.type === 'restaurant'),
+    events: candidates.filter(c => c.type === 'event'),
+    nightlife: candidates.filter(c => c.type === 'nightlife'),
+  });
+
+  // Replace candidates with deduplicated pool + hotels + transport
+  candidates = [
+    ...candidatePool.attractions,
+    ...candidatePool.restaurants,
+    ...candidatePool.events,
+    ...candidatePool.nightlife,
+    ...candidates.filter(c => c.type === 'hotel' || c.type === 'transport' || c.type === 'flight' || c.type === 'train' || c.type === 'bus'),
+  ];
+  logger.info(`[UNIQUENESS-ENGINE] After dedup: ${candidates.length} candidates (${candidatePool.attractions.length} attractions, ${candidatePool.restaurants.length} restaurants, ${candidatePool.events.length} events)`);
+
+  // ═══ STEP 1e: Day-Aware Data Collection ═══
+  // Build date-specific candidate pools for each day of the trip.
+  // Ensures weather, events, opening hours are day-specific.
+  const dayAwareResult = dayAwareProvider.runDayAwarePipeline({
+    startDate,
+    endDate,
+    attractions: candidates.filter(c => c.type === 'attraction'),
+    restaurants: candidates.filter(c => c.type === 'restaurant'),
+    events: candidates.filter(c => c.type === 'event'),
+    nightlife: candidates.filter(c => c.type === 'nightlife'),
+    weatherForecast: weatherResult?.data?.forecast || null,
+    prefs,
+    logPipeline: true,
+  });
+
+  // Enrich candidates with day availability metadata
+  candidates = dayAwareProvider.enrichCandidatesWithDayAvailability(
+    candidates, dayAwareResult.dayPools
+  );
+
+  logger.info(`[DAY-AWARE] Pipeline: ${dayAwareResult.summary.totalDays} days, ` +
+    `avg ${dayAwareResult.summary.avgAttractionsPerDay} attractions/day, ` +
+    `${dayAwareResult.summary.daysWithEvents} days with events`);
+
+  // ═══ STEP 1f: Geographic Area Clustering ═══
+  // Cluster candidates into geographic zones for day-wise planning.
+  // Each day gets a distinct geographic area to minimize travel.
+  const geoClusterResult = geoClustering.runGeographicClustering({
+    attractions: candidates.filter(c => c.type === 'attraction'),
+    restaurants: candidates.filter(c => c.type === 'restaurant'),
+    nightlife: candidates.filter(c => c.type === 'nightlife'),
+    events: candidates.filter(c => c.type === 'event'),
+    daysCount,
+    destination,
+    hotelCentroid: null,
+    logPipeline: true,
+  });
+
+  logger.info(`[GEO-CLUSTER] Pipeline: ${geoClusterResult.summary.clustersCreated} clusters, ` +
+    `${geoClusterResult.summary.avgAttractionsPerDay} avg attractions/day, ` +
+    `${geoClusterResult.summary.avgRouteDistanceKm}km avg route distance`);
 
   // ═══ STEP 2-5: AI planning with replanning loop ═══
   let lastAIResult = null;
@@ -652,6 +800,13 @@ export async function runAIPlanningPipeline(opts) {
         isOverBudget,
         existingDaysPlan,
         userId,
+        // Anti-hallucination: pass normalized candidates for trusted dataset
+        normalizedCandidates: candidates,
+        // Day-aware context: per-day weather, events, and filtered candidates
+        dayAwareContext: dayAwareResult?.dayContexts || null,
+        daySelections: dayAwareResult?.daySelections || null,
+        // Geographic clustering: per-day zones with attraction/restaurant pools
+        geoClusters: geoClusterResult?.dayAssignments || null,
         // Pass replanning context
         replanErrors: validationErrors.length > 0 ? validationErrors : undefined,
         previousPlan: lastAIResult?.itinerary?.days ? { days: lastAIResult.itinerary.days } : undefined,
@@ -682,7 +837,7 @@ export async function runAIPlanningPipeline(opts) {
 
     const resolvedTotalCost = resolved.reduce((sum, d) => sum + (d.dayCost || 0), 0);
 
-    // ═══ STEP 4b: Deterministic validation with candidates ═══
+    // ═══ STEP 4b: Hard validation gate + enhanced validation ═══
     const validation = await finalValidatorAgent.run({
       days: resolved,
       budget: totalBudget,
@@ -696,6 +851,10 @@ export async function runAIPlanningPipeline(opts) {
       transportResult,
       hotelResult,
       routeCache,
+      destLock,
+      destCentroid: geoClusterResult?.clusterInfo?.centroid || null,
+      currency,
+      partySize,
     });
 
     lastValidation = validation;
@@ -712,9 +871,9 @@ export async function runAIPlanningPipeline(opts) {
     });
 
     if (validation.data.passed) {
-      // ═══ Validation passed! ═══
-      logger.info(`[AI-PLANNING] Validation PASSED on attempt ${attempt} (${aiResult.provider}, ${resolvedTotalCost} ${currency})`);
-      finalDays = resolved;
+      // ═══ Validation passed! Use repaired days if available ═══
+      finalDays = validation.data.repairedDays || resolved;
+      logger.info(`[AI-PLANNING] Validation PASSED on attempt ${attempt} (${aiResult.provider}, ${resolvedTotalCost} ${currency}, ${validation.data.repairCount || 0} repairs)`);
       break;
     }
 

@@ -1,8 +1,8 @@
-import mapsProvider from '../providers/maps.provider.js';
+import routesProvider from '../providers/googleRoutes.provider.js';
 import logger from '../utils/logger.js';
 
 /**
- * Traffic Agent: real Geoapify Routing/Matrix data.
+ * Traffic Agent: real Google Routes data.
  * Now purely provider-based — no Gemini calls. Traffic data is returned
  * directly from the provider with deterministic summaries.
  */
@@ -18,7 +18,7 @@ class TrafficAgent {
   async run({ destination, hotelName }) {
     logger.entry('[AGENT:traffic]', 'run', { destination, hotelName });
     const started = Date.now();
-    const providerResult = await mapsProvider.directions(
+    const providerResult = await routesProvider.directions(
       hotelName ? `${hotelName}, ${destination}` : destination,
       destination,
       'driving'
@@ -44,7 +44,7 @@ class TrafficAgent {
 
     const directions = providerResult.data;
     const routes = directions?.routes || [];
-    logger.info(`[AGENT:traffic] Got ${routes.length} routes from Geoapify`);
+    logger.info(`[AGENT:traffic] Got ${routes.length} routes from Google Routes`);
     const mainRoute = routes[0] || {};
 
     // Deterministic suggestions from real routing data
@@ -80,7 +80,7 @@ class TrafficAgent {
         suggestions,
         riskyLegs,
       },
-      message: `Traffic data from Geoapify (${routes.length} routes)`,
+      message: `Traffic data from Google Routes (${routes.length} routes)`,
       latencyMs: Date.now() - started,
       usedAI: false,
       source: 'provider',

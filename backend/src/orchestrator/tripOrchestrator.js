@@ -17,16 +17,20 @@ import trafficAgent from '../agents/traffic.agent.js';
 import localGuideAgent from '../agents/localGuide.agent.js';
 import safetyAgent from '../agents/safety.agent.js';
 import culturalEventsAgent from '../agents/culturalEvents.agent.js';
-import finalValidatorAgent from '../agents/finalValidator.agent.js';
+import finalValidatorAgent, { validationMessages } from '../agents/finalValidator.agent.js';
 import budgetService from '../services/budget.service.js';
 import budgetEngine from '../services/budgetEngine.service.js';
 import itineraryService, { setRouteCache } from '../services/itinerary.service.js';
 import { generateItinerary, getRequestCount } from '../services/itineraryGenerator.service.js';
 import { runAIPlanningPipeline } from './orchestratorAIPlanning.js';
-import placesProvider from '../providers/places.provider.js';
-import mapsProvider from '../providers/maps.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
+import routesProvider from '../providers/googleRoutes.provider.js';
+import geocodeProvider from '../providers/googleGeocoding.provider.js';
 import transportIntel from '../services/transportIntelligence.service.js';
 import { notifyTripPlanned, notifyBudgetOptimized } from '../services/notification.service.js';
+import destinationLock from '../services/destinationLock.service.js';
+import candidateQuality from '../services/candidateQuality.service.js';
+import restaurantPipeline from '../services/restaurantCandidatePipeline.service.js';
 
 function fmtDate(d) {
   const date = new Date(d);
@@ -46,7 +50,7 @@ function inferTransportMode({ origin, destination, transportPreference }) {
  */
 async function prefetchActivityRoutes({ attractions, restaurants, hotelResult, destination }) {
   const routeCache = new Map();
-  if (!env.GEOAPIFY_API_KEY) return routeCache;
+  if (!env.GOOGLE_MAPS_API_KEY) return routeCache;
 
   // Collect all unique coordinate pairs that will need routes
   const coords = [];
@@ -108,7 +112,7 @@ async function prefetchActivityRoutes({ attractions, restaurants, hotelResult, d
     const batch = uniquePairs.slice(i, i + BATCH_SIZE);
     const results = await Promise.allSettled(
       batch.map(([a, b]) =>
-        mapsProvider.directions(`${a.lat},${a.lng}`, `${b.lat},${b.lng}`, 'driving', false)
+        routesProvider.directions(`${a.lat},${a.lng}`, `${b.lat},${b.lng}`, 'driving', false)
           .then((result) => ({ a, b, result }))
       )
     );
@@ -124,7 +128,7 @@ async function prefetchActivityRoutes({ attractions, restaurants, hotelResult, d
         const method = km < 1.5 ? 'walking' : km < 12 ? 'taxi/auto' : 'bus/metro';
         const forwardKey = `${a.lat},${a.lng}|${b.lat},${b.lng}`;
         const reverseKey = `${b.lat},${b.lng}|${a.lat},${a.lng}`;
-        const entry = { distanceKm: km, durationMin: min, method, source: 'geoapify-routes' };
+        const entry = { distanceKm: km, durationMin: min, method, source: 'google-routes' };
         routeCache.set(forwardKey, entry);
         routeCache.set(reverseKey, entry);
       }
@@ -199,20 +203,45 @@ export async function generateTrip({ user, request }) {
   logger.info(`[ORCHESTRATOR] Rooms needed: ${rooms}, Days: ${daysCount}, Destination: ${destination}`);
 
   // ══════════════════════════════════════════════════════════════════════
+  // DESTINATION LOCK: Resolve destination into canonical geographic object
+  // Used to validate all provider results against the destination boundary.
+  // ══════════════════════════════════════════════════════════════════════
+  let destLock = null;
+  try {
+    destLock = await destinationLock.resolveDestination(destination);
+    if (destLock) {
+      const summary = destinationLock.getDestinationLockSummary(destLock);
+      logger.info(`[DESTINATION-LOCK] Resolved: ${JSON.stringify(summary)}`);
+    } else {
+      logger.warn(`[DESTINATION-LOCK] Could not resolve destination "${destination}" — geographic filtering disabled`);
+    }
+  } catch (err) {
+    logger.warn(`[DESTINATION-LOCK] Resolution failed: ${err.message} — geographic filtering disabled`);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
   // BATCH 2: All external provider API calls in PARALLEL via Promise.all
   // This is the main performance improvement — all providers run concurrently.
   // ══════════════════════════════════════════════════════════════════════
-  const runWithTimeout = (fn, name) =>
-    Promise.race([
+  const runWithTimeout = (fn, name) => {
+    // Clear the guard timer when the provider settles first, so a fast
+    // provider never leaves a stale timer that later logs a misleading
+    // "Timed out" warning or keeps the process alive for 20s.
+    let timer = null;
+    const guard = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        console.warn(`[${name}] Timed out`);
+        resolve(null);
+      }, 20000);
+    });
+    return Promise.race([
       fn().catch((err) => {
         console.warn(`[${name}] Error: ${err.message}`);
         return null;
       }),
-      new Promise((resolve) => setTimeout(() => {
-        console.warn(`[${name}] Timed out`);
-        resolve(null);
-      }, 20000)),
-    ]);
+      guard,
+    ]).finally(() => clearTimeout(timer));
+  };
 
   logger.info('[ORCHESTRATOR] ═══ BATCH 2: All external provider API calls in PARALLEL ═══');
   const [
@@ -287,13 +316,67 @@ export async function generateTrip({ user, request }) {
   if (eventsResult) { report.push(culturalEventsAgent.report(eventsResult)); logger.agent('culturalEvents', 'run', { status: eventsResult.status, eventCount: eventsResult.data?.totalEvents || 0, daysWithEvents: eventsResult.data?.daysWithEvents || 0 }); }
   logger.info('[ORCHESTRATOR] Batch 2 results: weather=' + (weatherResult?.status || 'null') + ', hotel=' + (hotelResult?.status || 'null') + ', attractions=' + (attractionResult?.data?.attractions?.length || 0) + ', restaurants=' + (restaurantResult?.data?.restaurants?.length || 0) + ', events=' + (eventsResult?.data?.totalEvents || 0));
 
+  // ══════════════════════════════════════════════════════════════════════
+  // DESTINATION LOCK: Filter attractions, restaurants, and nightlife
+  // against the resolved destination boundary.
+  // ══════════════════════════════════════════════════════════════════════
+  const destLockRejections = [];
+  if (destLock) {
+    // Filter attractions
+    if (attractionResult?.data?.attractions?.length) {
+      const { accepted, rejected, rejectionLog } = destinationLock.filterPlaces(
+        attractionResult.data.attractions, destLock, 'google'
+      );
+      destLockRejections.push(...rejectionLog);
+      if (rejected.length > 0) {
+        logger.info(`[DESTINATION-LOCK] Attractions: ${accepted.length} accepted, ${rejected.length} rejected`);
+        attractionResult.data.attractions = accepted;
+        attractionResult.data.destinationLockFiltered = rejected.length;
+      }
+    }
+    // Filter restaurants
+    if (restaurantResult?.data?.restaurants?.length) {
+      const { accepted, rejected, rejectionLog } = destinationLock.filterPlaces(
+        restaurantResult.data.restaurants, destLock, 'google'
+      );
+      destLockRejections.push(...rejectionLog);
+      if (rejected.length > 0) {
+        logger.info(`[DESTINATION-LOCK] Restaurants: ${accepted.length} accepted, ${rejected.length} rejected`);
+        restaurantResult.data.restaurants = accepted;
+        restaurantResult.data.destinationLockFiltered = rejected.length;
+      }
+    }
+    // Filter hotels
+    if (hotelResult?.data?.hotels?.length) {
+      const { accepted, rejected, rejectionLog } = destinationLock.filterCandidates(
+        hotelResult.data.hotels.map((h) => ({
+          ...h,
+          latitude: h.latitude ?? null,
+          longitude: h.longitude ?? null,
+          city: h.city || h.address?.split(',').slice(-2, -1)[0]?.trim() || '',
+          country: h.country || '',
+        })),
+        destLock,
+        'amadeus'
+      );
+      destLockRejections.push(...rejectionLog);
+      if (rejected.length > 0) {
+        logger.info(`[DESTINATION-LOCK] Hotels: ${accepted.length} accepted, ${rejected.length} rejected`);
+        hotelResult.data.hotels = accepted.map((h) => {
+          const { latitude, longitude, city, country, ...rest } = h;
+          return rest;
+        });
+        hotelResult.data.destinationLockFiltered = rejected.length;
+      }
+    }
+  }
   logger.info('[ORCHESTRATOR] ═══ BATCH 2b: Nightlife (geocoding + nearby search) ═══');
   // ══════════════════════════════════════════════════════════════════════
   // BATCH 2b: Nightlife (depends on geocoding, run after main providers)
   // ══════════════════════════════════════════════════════════════════════
   let nightlifeData = [];
   try {
-    const geo = await mapsProvider.geocode(destination);
+    const geo = await geocodeProvider.geocode(destination);
     if (geo.isLive && geo.data?.lat != null) {
       const nl = await placesProvider.nearbySearch({
         lat: geo.data.lat,
@@ -314,6 +397,130 @@ export async function generateTrip({ user, request }) {
     message: nightlifeData.length ? `${nightlifeData.length} real nightlife places found` : 'Nightlife data unavailable - local attractions used instead',
     usedAI: false,
   });
+
+  // Destination Lock: Filter nightlife after it's fetched
+  if (destLock && nightlifeData.length) {
+    const { accepted: nlAccepted, rejected: nlRejected, rejectionLog: nlRejections } =
+      destinationLock.filterPlaces(nightlifeData, destLock, 'google');
+    destLockRejections.push(...nlRejections);
+    if (nlRejected.length > 0) {
+      logger.info(`[DESTINATION-LOCK] Nightlife: ${nlAccepted.length} accepted, ${nlRejected.length} rejected`);
+      nightlifeData = nlAccepted;
+    }
+  }
+
+  // Destination Lock: Final report after all filtering is complete
+  if (destLockRejections.length > 0) {
+    report.push({
+      agent: 'destination-lock',
+      status: 'success',
+      message: `Destination Lock: ${destLockRejections.length} candidate(s) rejected from ${destination} itinerary`,
+      latencyMs: 0,
+      usedAI: false,
+      rejections: destLockRejections,
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
+  // CANDIDATE QUALITY: Filter low-quality, test, and utility candidates
+  // ══════════════════════════════════════════════════════════════════════
+  const qualityRejections = [];
+  // Filter attractions
+  if (attractionResult?.data?.attractions?.length) {
+    const { accepted, rejected, rejectionLog } = candidateQuality.filterByQuality(
+      attractionResult.data.attractions, 'attraction', 'google'
+    );
+    qualityRejections.push(...rejectionLog);
+    if (rejected.length > 0) {
+      logger.info(`[CANDIDATE-QUALITY] Attractions: ${accepted.length} accepted, ${rejected.length} rejected`);
+      attractionResult.data.attractions = accepted;
+    }
+  }
+  // Filter restaurants — candidate quality + strict restaurant pipeline
+  if (restaurantResult?.data?.restaurants?.length) {
+    const { accepted, rejected, rejectionLog } = candidateQuality.filterByQuality(
+      restaurantResult.data.restaurants, 'restaurant', 'google'
+    );
+    qualityRejections.push(...rejectionLog);
+    if (rejected.length > 0) {
+      logger.info(`[CANDIDATE-QUALITY] Restaurants: ${accepted.length} accepted, ${rejected.length} rejected`);
+      restaurantResult.data.restaurants = accepted;
+    }
+    // Strict restaurant pipeline: validate category, reject non-restaurants
+    if (restaurantResult.data.restaurants?.length) {
+      const pipelineResult = restaurantPipeline.runRestaurantPipeline(
+        restaurantResult.data.restaurants, destLock
+      );
+      if (pipelineResult.rejected.length > 0) {
+        logger.info(`[RESTAURANT-PIPELINE] ${pipelineResult.accepted.length} accepted, ${pipelineResult.rejected.length} rejected`);
+        for (const r of pipelineResult.rejectionLog) {
+          logger.warn(`[RESTAURANT-PIPELINE] REJECTED: "${r.name}" — ${r.rejection}`);
+        }
+        // Map normalized pipeline output back to raw shape for downstream consumers
+        restaurantResult.data.restaurants = pipelineResult.accepted.map((nr) => ({
+          name: nr.canonicalName,
+          placeId: nr.providerId,
+          address: nr.address,
+          city: nr.city,
+          country: nr.country,
+          coordinates: nr.latitude != null && nr.longitude != null ? { lat: nr.latitude, lng: nr.longitude } : null,
+          rating: nr.rating,
+          reviewCount: nr.reviewCount,
+          priceLevel: nr.priceLevel,
+          averageCostPerPerson: nr.averageCostPerPerson,
+          cuisines: nr.cuisine,
+          openingHours: nr.openingHours,
+          source: nr.source,
+          provider: nr.provider,
+          providerId: nr.providerId,
+          types: ['catering.restaurant'],
+          dataStatus: nr.dataStatus,
+          isEstimate: nr.isEstimate,
+        }));
+      }
+    }
+  }
+  // Filter nightlife
+  if (nightlifeData.length) {
+    const { accepted, rejected, rejectionLog } = candidateQuality.filterByQuality(
+      nightlifeData, 'nightlife', 'google'
+    );
+    qualityRejections.push(...rejectionLog);
+    if (rejected.length > 0) {
+      logger.info(`[CANDIDATE-QUALITY] Nightlife: ${accepted.length} accepted, ${rejected.length} rejected`);
+      nightlifeData = accepted;
+    }
+  }
+  // Filter hotels
+  if (hotelResult?.data?.hotels?.length) {
+    const { accepted, rejected, rejectionLog } = candidateQuality.filterByQuality(
+      hotelResult.data.hotels.map((h) => ({
+        ...h,
+        latitude: h.latitude ?? null,
+        longitude: h.longitude ?? null,
+      })),
+      'hotel',
+      'amadeus'
+    );
+    qualityRejections.push(...rejectionLog);
+    if (rejected.length > 0) {
+      logger.info(`[CANDIDATE-QUALITY] Hotels: ${accepted.length} accepted, ${rejected.length} rejected`);
+      hotelResult.data.hotels = accepted.map((h) => {
+        const { latitude, longitude, ...rest } = h;
+        return rest;
+      });
+    }
+  }
+  if (qualityRejections.length > 0) {
+    report.push({
+      agent: 'candidate-quality',
+      status: 'success',
+      message: `Candidate Quality: ${qualityRejections.length} candidate(s) rejected (low quality / utility / test data)`,
+      latencyMs: 0,
+      usedAI: false,
+      rejections: qualityRejections,
+    });
+  }
 
   logger.info('[ORCHESTRATOR] ═══ BATCH 3: Transport Intelligence Engine ═══');
   const transportMode = inferTransportMode({ origin: request.origin, destination, transportPreference: prefs.transportPreference });
@@ -606,6 +813,7 @@ export async function generateTrip({ user, request }) {
       existingDaysPlan: days,
       userId,
       routeCache,
+      destLock,
     });
   } catch (err) {
     console.error(`[orchestratorAIPlanning] Unexpected error: ${err.message}`);
@@ -727,22 +935,24 @@ export async function generateTrip({ user, request }) {
       originGeo: transportResult.data?.originGeo || null,
       destGeo: transportResult.data?.destGeo || null,
     },
-    accommodation: hotelResult?.data?.recommended
+    accommodation: hotelResult?.data?.recommended && hotelResult.data.recommended.price?.amount > 0
       ? {
           name: hotelResult.data.recommended.name,
           address: hotelResult.data.recommended.address || '',
-          pricePerNight: hotelResult.data.recommended.price?.amount ?? null,
+          pricePerNight: hotelResult.data.recommended.price.amount,
           isLive: hotelResult.data.isLive === true,
           source: 'amadeus-hotels',
         }
-      : { name: '', isLive: false, source: 'unavailable' },
+      : { name: null, pricePerNight: null, isLive: false, source: 'unavailable', message: 'Live hotel data unavailable — no provider offers found' },
     safetyNotes: safetyResult?.data?.safetyTips?.join(' • ') || '',
     emergencyInfo: null,
     agentReport: report,
     validation: {
       passed: usedAIPlan ? (aiPlanningResult.validation?.passed ?? validation.data?.passed) : validation.data?.passed,
-      issues: usedAIPlan ? (aiPlanningResult.validation?.issues || validation.data?.issues || []) : validation.data?.issues || [],
-      warnings: usedAIPlan ? (aiPlanningResult.validation?.warnings || validation.data?.warnings || []) : validation.data?.warnings || [],
+      // The Final Validator emits structured entries; the schema + UI expect
+      // plain strings, so reduce every entry to its message before persisting.
+      issues: validationMessages(usedAIPlan ? (aiPlanningResult.validation?.issues || validation.data?.issues || []) : validation.data?.issues || []),
+      warnings: validationMessages(usedAIPlan ? (aiPlanningResult.validation?.warnings || validation.data?.warnings || []) : validation.data?.warnings || []),
       validatedAt: new Date(),
       usedAIPlan,
       aiProvider: usedAIPlan ? aiProvider : null,

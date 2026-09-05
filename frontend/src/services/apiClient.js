@@ -76,7 +76,9 @@ export const placesApi = {
 
 export const mapsApi = {
   geocode: (address) => api.get('/maps/geocode', { params: { address } }),
-  autocomplete: (params) => api.get('/maps/autocomplete', { params }),
+  // Optional second arg forwards axios options (e.g. { signal }) so callers
+  // can cancel stale in-flight autocomplete requests.
+  autocomplete: (params, options) => api.get('/maps/autocomplete', { params, ...options }),
   directions: (params) => api.get('/maps/directions', { params }),
   nearby: (params) => api.get('/maps/nearby', { params }),
 };

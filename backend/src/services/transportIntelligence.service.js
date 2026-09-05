@@ -1,5 +1,6 @@
-import mapsProvider from '../providers/maps.provider.js';
-import placesProvider from '../providers/places.provider.js';
+import geocodeProvider from '../providers/googleGeocoding.provider.js';
+import routesProvider from '../providers/googleRoutes.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
 import flightProvider from '../providers/flight.provider.js';
 import trainProvider from '../providers/train.provider.js';
 import busProvider from '../providers/bus.provider.js';
@@ -89,15 +90,15 @@ export async function geocodeLocation(query) {
   const hit = cached(ck);
   if (hit) return hit;
 
-  const result = await mapsProvider.geocode(query);
+  const result = await geocodeProvider.geocode(query);
   if (!result.isLive || !result.data) {
     logger.warn(`[transportIntel] Geocoding failed for "${query}": ${result.message}`);
     return null;
   }
 
   const d = result.data;
-  // Geoapify doesn't always return city/state/country in the basic geocode.
-  // The formatted address usually contains this info.
+  // The Google Geocoding API returns locality fields (city/state/country)
+  // parsed from address components; fall back to the formatted address.
   const geo = {
     lat: d.lat,
     lng: d.lng,
@@ -106,7 +107,7 @@ export async function geocodeLocation(query) {
     city: d.city || d.formatted || query,
     state: d.state || '',
     country: d.country || '',
-    source: 'geoapify',
+    source: 'google-geocoding',
   };
 
   cacheSet(ck, geo);
@@ -137,7 +138,7 @@ export async function findNearbyAirports(location, { radiusKm = NEARBY_AIRPORT_R
 
   // Strategy:
   // 1. Search AviationStack for airports near the city/region
-  // 2. Fallback: search Geoapify for airport POIs near the coordinates
+  // 2. Fallback: search Google Places for airport POIs near the coordinates
   // 3. Never invent airports — only use real data from APIs
 
   // 1. AviationStack airport search by city/region name
@@ -167,7 +168,7 @@ export async function findNearbyAirports(location, { radiusKm = NEARBY_AIRPORT_R
     }
   }
 
-  // 2. Geoapify POI search for airports near the coordinates
+  // 2. Google Places POI search for airports near the coordinates
   if (airports.length === 0) {
     try {
       const nearby = await placesProvider.nearbySearch({
@@ -195,7 +196,7 @@ export async function findNearbyAirports(location, { radiusKm = NEARBY_AIRPORT_R
         }
       }
     } catch (err) {
-      logger.warn(`[transportIntel] Geoapify airport search failed: ${err.message}`);
+      logger.warn(`[transportIntel] Google Places airport search failed: ${err.message}`);
     }
   }
 
@@ -224,8 +225,8 @@ export async function findNearbyRailwayStations(location, { radiusKm = NEARBY_ST
 
   const stations = [];
 
-  // Strategy: Use Geoapify's POI search for railway stations near the location.
-  // Geoapify category for railway stations: public_transport.railway_station
+  // Strategy: Use Google Places's POI search for railway stations near the location.
+  // Google Places category for railway stations: public_transport.railway_station
   try {
     const nearby = await placesProvider.nearbySearch({
       lat: location.lat,
@@ -278,7 +279,7 @@ export async function findNearbyRailwayStations(location, { radiusKm = NEARBY_ST
 
 /**
  * Find nearby bus terminals.
- * Uses Geoapify POI search for bus stations.
+ * Uses Google Places POI search for bus stations.
  */
 export async function findNearbyBusTerminals(location, { radiusKm = NEARBY_TERMINAL_RADIUS_KM, limit = HUB_SEARCH_LIMIT } = {}) {
   if (!location?.lat || !location?.lng) return [];
@@ -342,7 +343,7 @@ export async function findNearbyBusTerminals(location, { radiusKm = NEARBY_TERMI
 
 /**
  * Calculate ground transfer details between two points.
- * Uses Geoapify Routes API for real distance and duration.
+ * Uses Google Places Routes API for real distance and duration.
  * Returns distance, duration, and estimated cab fare.
  */
 export async function calculateGroundTransfer(origin, destination, currency = 'INR') {
@@ -370,11 +371,11 @@ export async function calculateGroundTransfer(origin, destination, currency = 'I
     };
   }
 
-  // Try real routing via Geoapify
+  // Try real routing via Google Places
   try {
     const originStr = `${origin.lat},${origin.lng}`;
     const destStr = `${destination.lat},${destination.lng}`;
-    const routeResult = await mapsProvider.directions(originStr, destStr, 'driving', false);
+    const routeResult = await routesProvider.directions(originStr, destStr, 'driving', false);
 
     if (routeResult.isLive && routeResult.data?.routes?.length) {
       const route = routeResult.data.routes[0];
@@ -384,7 +385,7 @@ export async function calculateGroundTransfer(origin, destination, currency = 'I
         method: 'cab/car',
         fare: estimateCabFare(route.distanceKm || dist, currency),
         isLive: true,
-        source: 'geoapify-routes',
+        source: 'google-routes',
         message: `Real driving route: ${route.distanceKm} km, ${route.durationMin} min`,
       };
     }
@@ -744,7 +745,7 @@ export async function checkBusAvailability(originGeo, destGeo, opts = {}) {
 
 /**
  * Calculate road option (self-drive / cab for the entire journey).
- * Always available — uses Geoapify Routes for real distance + duration.
+ * Always available — uses Google Places Routes for real distance + duration.
  */
 export async function checkRoadAvailability(originGeo, destGeo, currency = 'INR') {
   const transfer = await calculateGroundTransfer(

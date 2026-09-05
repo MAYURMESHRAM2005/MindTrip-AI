@@ -5,7 +5,7 @@ import geminiService from './gemini.service.js';
 import logger from '../utils/logger.js';
 import orchestrator from '../orchestrator/tripOrchestrator.js';
 import weatherProvider from '../providers/weather.provider.js';
-import placesProvider from '../providers/places.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
 import budgetService from './budget.service.js';
 import itineraryService from './itinerary.service.js';
 import Expense from '../models/Expense.js';

@@ -57,7 +57,7 @@ export default function Emergency() {
     queryKey: ['emergency-nearby', location],
     queryFn: () => emergencyApi.nearby({ lat: location.lat, lng: location.lng }).then((r) => ({ ...r.data.data, _apiMessage: r.data.message })),
     enabled: Boolean(location),
-    retry: 1,
+    // Global retry policy applies (no retry on 429 quota errors).
     staleTime: 30000,
   });
 

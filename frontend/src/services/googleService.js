@@ -3,15 +3,15 @@ import { geocodeApi, routesApi, mapsApi } from './apiClient';
 /**
  * Frontend maps service — a thin proxy over the backend.
  *
- * All Geoapify calls (geocoding, routing, nearby places) happen on the
+ * All Google Places calls (geocoding, routing, nearby places) happen on the
  * backend via /api/geocode, /api/routes and /api/maps/nearby. The frontend
- * never talks to Geoapify directly and never holds an API key.
+ * never talks to Google Places directly and never holds an API key.
  *
  * Every method resolves to a normalized shape and never rejects for
  * provider/network failures — the UI decides what to show.
  */
 
-/** Map Geoapify-style mode names to the backend's validated route modes. */
+/** Map Google Places-style mode names to the backend's validated route modes. */
 const MODE_MAP = {
   drive: 'driving',
   driving: 'driving',
@@ -33,8 +33,8 @@ export const NEARBY_CATEGORIES = [
   { key: 'transit_station', label: 'Transit stations', color: '#14b8a6', categories: 'public_transport' },
 ];
 
-/** Keys are stored server-side only — the backend owns all Geoapify calls. */
-export function geoapifyConfigured() {
+/** Keys are stored server-side only — the backend owns all Google Places calls. */
+export function googleConfigured() {
   return true;
 }
 
@@ -76,7 +76,7 @@ function decodePolyline(encoded) {
 
 /**
  * Geocode a free-text address → { lat, lng, address, placeId, isLive }.
- * Resolved by the backend through Geoapify.
+ * Resolved by the backend through Google Places.
  */
 export async function geocode(address) {
   if (!address?.trim()) return { isLive: false, message: 'Enter a location to search' };
@@ -171,6 +171,6 @@ export async function getNearby({ lat, lng, radius = 6000 }) {
   }
 }
 
-export const geoapifyService = { geocode, getRoute, getNearby, geoapifyConfigured, NEARBY_CATEGORIES };
+export const googleService = { geocode, getRoute, getNearby, googleConfigured, NEARBY_CATEGORIES };
 
-export default geoapifyService;
+export default googleService;

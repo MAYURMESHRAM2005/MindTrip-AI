@@ -225,9 +225,9 @@ export const DICT = {
   'Ready to generate': { en: 'Ready to generate', hi: 'बनाने के लिए तैयार', mr: 'तयार करण्यासाठी सज्ज' },
   'A suggested destination': { en: 'A suggested destination', hi: 'एक सुझाया गया गंतव्य', mr: 'एक सुचवलेले गंतव्यस्थान' },
   'Live from': { en: 'Live from', hi: 'लाइव', mr: 'लाइव्ह' },
-  'Live from Geoapify Places': { en: 'Live from Geoapify Places', hi: 'Geoapify Places से लाइव', mr: 'Geoapify Places कडून लाइव्ह' },
+  'Live from Google Places': { en: 'Live from Google Places', hi: 'Google Places से लाइव', mr: 'Google Places कडून लाइव्ह' },
   'Live offers from Amadeus': { en: 'Live offers from Amadeus', hi: 'Amadeus से लाइव ऑफर', mr: 'Amadeus कडून लाइव्ह ऑफर' },
-  'Live listings from Geoapify Places': { en: 'Live listings from Geoapify Places', hi: 'Geoapify Places से लाइव सूचियां', mr: 'Geoapify Places कडून लाइव्ह याद्या' },
+  'Live listings from Google Places': { en: 'Live listings from Google Places', hi: 'Google Places से लाइव सूचियां', mr: 'Google Places कडून लाइव्ह याद्या' },
   'price level': { en: 'price level', hi: 'मूल्य स्तर', mr: 'किंमत पातळी' },
   'trips': { en: 'trips', hi: 'यात्राएं', mr: 'सहली' },
   'Run the agent pipeline': { en: 'Run the agent pipeline', hi: 'एजेंट पाइपलाइन चलाएं', mr: 'एजंट पाइपलाइन चालवा' },
@@ -284,6 +284,19 @@ export const DICT = {
   'Cumulative': { en: 'Cumulative', hi: 'संचयी', mr: 'संचयी' },
   'Remaining budget': { en: 'Remaining budget', hi: 'शेष बजट', mr: 'उर्वरित बजेट' },
   'Book / source': { en: 'Book / source', hi: 'बुक / स्रोत', mr: 'बुक / स्रोत' },
+  'Data source info': { en: 'Data source info', hi: 'डेटा स्रोत जानकारी', mr: 'डेटा स्रोत माहिती' },
+  'Provider': { en: 'Provider', hi: 'प्रदाता', mr: 'प्रदाता' },
+  'Provider ID': { en: 'Provider ID', hi: 'प्रदाता आईडी', mr: 'प्रदाता आयडी' },
+  'Live price': { en: 'Live price', hi: 'लाइव मूल्य', mr: 'लाइव्ह किंमत' },
+  'Estimated price': { en: 'Estimated price', hi: 'अनुमानित मूल्य', mr: 'अंदाजित किंमत' },
+  'Price': { en: 'Price', hi: 'मूल्य', mr: 'किंमत' },
+  'Price unavailable': { en: 'Price unavailable', hi: 'मूल्य अनुपलब्ध', mr: 'किंमत अनुपलब्ध' },
+  'unavailable': { en: 'unavailable', hi: 'अनुपलब्ध', mr: 'अनुपलब्ध' },
+  'live': { en: 'live', hi: 'लाइव', mr: 'लाइव्ह' },
+  'Live hotel offers unavailable — no real hotel data to display.': { en: '🔴 Live hotel offers unavailable — no real hotel data to display.', hi: '🔴 लाइव होटल ऑफर अनुपलब्ध — प्रदर्शन के लिए कोई वास्तविक होटल डेटा नहीं।', mr: '🔴 लाइव्ह हॉटेल ऑफर अनुपलब्ध — प्रदर्शनासाठी कोणताही वास्तविक हॉटेल डेटा नाही.' },
+  'Live restaurant data unavailable — no real restaurant data to display.': { en: '🔴 Live restaurant data unavailable — no real restaurant data to display.', hi: '🔴 लाइव रेस्तरां डेटा अनुपलब्ध — प्रदर्शन के लिए कोई वास्तविक रेस्तरां डेटा नहीं।', mr: '🔴 लाइव्ह रेस्टॉरंट डेटा अनुपलब्ध — प्रदर्शनासाठी कोणताही वास्तविक रेस्टॉरंट डेटा नाही.' },
+  'Live attraction data unavailable — no real attraction data to display.': { en: '🔴 Live attraction data unavailable — no real attraction data to display.', hi: '🔴 लाइव आकर्षण डेटा अनुपलब्ध — प्रदर्शन के लिए कोई वास्तविक आकर्षण डेटा नहीं।', mr: '🔴 लाइव्ह आकर्षण डेटा अनुपलब्ध — प्रदर्शनासाठी कोणताही वास्तविक आकर्षण डेटा नाही.' },
+
 
   // ── Itinerary cards ──
   'Trip summary': { en: 'Trip summary', hi: 'यात्रा सारांश', mr: 'सहल सारांश' },
@@ -418,7 +431,7 @@ export const DICT = {
   'Price on request': { en: 'Price on request', hi: 'कीमत अनुरोध पर', mr: 'किंमत विनंतीवर' },
   'View on provider': { en: 'View on provider', hi: 'प्रदाता पर देखें', mr: 'प्रदात्यावर पहा' },
   'Search failed. Please try again.': { en: 'Search failed. Please try again.', hi: 'खोज विफल रही। कृपया पुनः प्रयास करें।', mr: 'शोध अयशस्वी. कृपया पुन्हा प्रयत्न करा.' },
-  'Live offers from Amadeus, with Geoapify Places fallback.': { en: 'Live offers from Amadeus, with Geoapify Places fallback.', hi: 'Geoapify Places फॉलबैक के साथ Amadeus से लाइव ऑफर।', mr: 'Geoapify Places फॉलबॅकसह Amadeus कडून लाइव्ह ऑफर.' },
+  'Live offers from Amadeus, with Google Places fallback.': { en: 'Live offers from Amadeus, with Google Places fallback.', hi: 'Google Places फॉलबैक के साथ Amadeus से लाइव ऑफर।', mr: 'Google Places फॉलबॅकसह Amadeus कडून लाइव्ह ऑफर.' },
   'City / destination': { en: 'City / destination', hi: 'शहर / गंतव्य', mr: 'शहर / गंतव्यस्थान' },
   'Check-in': { en: 'Check-in', hi: 'चेक-इन', mr: 'चेक-इन' },
   'Check-out': { en: 'Check-out', hi: 'चेक-आउट', mr: 'चेक-आउट' },
@@ -443,7 +456,7 @@ export const DICT = {
   'No buses found.': { en: 'No buses found.', hi: 'कोई बस नहीं मिली।', mr: 'बसेस सापडल्या नाहीत.' },
 
   // ── Restaurants ──
-  'Real Geoapify Places data with food-preference filters.': { en: 'Real Geoapify Places data with food-preference filters.', hi: 'भोजन-प्राथमिकता फ़िल्टर के साथ वास्तविक Geoapify Places डेटा।', mr: 'जेवण-प्राधान्य फिल्टरसह वास्तविक Geoapify Places डेटा.' },
+  'Real Google Places data with food-preference filters.': { en: 'Real Google Places data with food-preference filters.', hi: 'भोजन-प्राथमिकता फ़िल्टर के साथ वास्तविक Google Places डेटा।', mr: 'जेवण-प्राधान्य फिल्टरसह वास्तविक Google Places डेटा.' },
   'City / place': { en: 'City / place', hi: 'शहर / स्थान', mr: 'शहर / ठिकाण' },
   'Search within (optional)': { en: 'Search within (optional)', hi: 'भीतर खोजें (वैकल्पिक)', mr: 'आत शोधा (ऐच्छिक)' },
   'Vegetarian': { en: 'Vegetarian', hi: 'शाकाहारी', mr: 'शाकाहारी' },
@@ -468,7 +481,7 @@ export const DICT = {
   'Could not get your location': { en: 'Could not get your location', hi: 'आपका स्थान प्राप्त नहीं हो सका', mr: 'तुमचे ठिकाण मिळू शकले नाही' },
 
   // ── Maps ──
-  'Geoapify geocoding, routing and nearby places on an OpenStreetMap base.': { en: 'Geoapify geocoding, routing and nearby places on an OpenStreetMap base.', hi: 'OpenStreetMap आधार पर Geoapify जियोकोडिंग, रूटिंग और आस-पास के स्थान।', mr: 'OpenStreetMap बेसवर Geoapify जिओकोडिंग, रूटिंग आणि जवळील ठिकाणे.' },
+  'Google Maps geocoding, routing and nearby places on an interactive map.': { en: 'Google Maps geocoding, routing and nearby places on an interactive map.', hi: 'इंटरैक्टिव मानचित्र पर Google Maps जियोकोडिंग, रूटिंग और आस-पास के स्थान।', mr: 'इंटरॲक्टिव्ह नकाशावर Google Maps जिओकोडिंग, रूटिंग आणि जवळील ठिकाणे.' },
   'Starting point (for route)': { en: 'Starting point (for route)', hi: 'प्रारंभिक बिंदु (मार्ग के लिए)', mr: 'प्रारंभ बिंदू (मार्गासाठी)' },
   'Loading…': { en: 'Loading…', hi: 'लोड हो रहा है…', mr: 'लोड होत आहे…' },
   'Show map': { en: 'Show map', hi: 'मानचित्र दिखाएं', mr: 'नकाशा दाखवा' },
@@ -725,7 +738,7 @@ export const DICT = {
   'Select a trip…': { en: 'Select a trip…', hi: 'यात्रा चुनें…', mr: 'सहल निवडा…' },
 
   // ── Image Search / Offline ──
-  'Upload a photo — Gemini identifies the place, Geoapify finds real info.': { en: 'Upload a photo — Gemini identifies the place, Geoapify finds real info.', hi: 'फोटो अपलोड करें — Gemini स्थान की पहचान करता है, Geoapify वास्तविक जानकारी ढूंढता है।', mr: 'फोटो अपलोड करा — Gemini ठिकाण ओळखतो, Geoapify वास्तविक माहिती शोधतो.' },
+  'Upload a photo — Gemini identifies the place, Google Places finds real info.': { en: 'Upload a photo — Gemini identifies the place, Google Places finds real info.', hi: 'फोटो अपलोड करें — Gemini स्थान की पहचान करता है, Google Places वास्तविक जानकारी ढूंढता है।', mr: 'फोटो अपलोड करा — Gemini ठिकाण ओळखतो, Google Places वास्तविक माहिती शोधतो.' },
   'Drop a travel photo here or click to upload': { en: 'Drop a travel photo here or click to upload', hi: 'यहां यात्रा फोटो छोड़ें या अपलोड करने के लिए क्लिक करें', mr: 'येथे प्रवास फोटो टाका किंवा अपलोड करण्यासाठी क्लिक करा' },
   'max 8MB': { en: 'max 8MB', hi: 'अधिकतम 8MB', mr: 'कमाल 8MB' },
   'Analyzing with Gemini…': { en: 'Analyzing with Gemini…', hi: 'Gemini से विश्लेषण हो रहा है…', mr: 'Gemini सह विश्लेषण होत आहे…' },
@@ -757,6 +770,9 @@ export const DICT = {
   'Login': { en: 'Login', hi: 'लॉगिन', mr: 'लॉगिन' },
   'No matching places.': { en: 'No matching places.', hi: 'कोई मेल खाते स्थान नहीं।', mr: 'जुळणारी ठिकाणे नाहीत.' },
   '/room/night': { en: '/room/night', hi: '/कमरा/रात', mr: '/खोली/रात्र' },
+  'places': { en: 'places', hi: 'स्थान', mr: 'ठिकाणे' },
+  'meals': { en: 'meals', hi: 'भोजन', mr: 'जेवणे' },
+  'hotels': { en: 'hotels', hi: 'होटल', mr: 'हॉटेल्स' },
 };
 
 const I18nContext = createContext({ lang: 'en', t: (k) => k, setLang: () => {} });

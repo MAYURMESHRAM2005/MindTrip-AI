@@ -1,5 +1,5 @@
 import ticketmasterProvider from '../providers/ticketmaster.provider.js';
-import mapsProvider from '../providers/maps.provider.js';
+import geocodeProvider from '../providers/googleGeocoding.provider.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -42,7 +42,7 @@ class CulturalEventsAgent {
     let destLng = lng;
     if (destLat == null || destLng == null) {
       try {
-        const geo = await mapsProvider.geocode(destination);
+        const geo = await geocodeProvider.geocode(destination);
         if (geo.isLive && geo.data?.lat != null) {
           destLat = geo.data.lat;
           destLng = geo.data.lng;

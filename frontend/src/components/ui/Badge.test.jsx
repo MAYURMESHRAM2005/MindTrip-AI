@@ -20,6 +20,6 @@ describe('DataStatusBadge', () => {
   });
   it('labels unavailable data honestly', () => {
     render(<DataStatusBadge status="unavailable" />);
-    expect(screen.getByText(/live data unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/data unavailable/i)).toBeInTheDocument();
   });
 });

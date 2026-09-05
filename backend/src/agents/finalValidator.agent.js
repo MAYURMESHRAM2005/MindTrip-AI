@@ -10,6 +10,8 @@
  *  - Falls back to deterministic validation when no candidates are provided
  */
 import logger from '../utils/logger.js';
+import uniquenessEngine from '../services/uniquenessEngine.service.js';
+import hardValidationGate from '../services/hardValidationGate.service.js';
 
 // ══════════════════════════════════════════════════════════════════════
 //  VALIDATION ERROR TYPES
@@ -42,6 +44,29 @@ export const ERROR_TYPES = Object.freeze({
 
 function createValidationError(type, day, providerId, message) {
   return { type, day: day || null, providerId: providerId || null, message };
+}
+
+/**
+ * Map validator issue/warning entries to plain display strings.
+ *
+ * The Final Validator produces structured entries ({ type, day, providerId,
+ * message }), but the persisted Itinerary schema declares
+ * validation.issues/warnings as [String] and the frontend renders each entry
+ * directly as text. Passing structured objects to Itinerary.create() throws a
+ * Mongoose CastError and forces the lossy "sanitized days" fallback, so every
+ * entry must be reduced to its message string at persistence boundaries.
+ * Plain strings (legacy entries) pass through untouched.
+ */
+export function validationMessages(entries = []) {
+  if (!Array.isArray(entries)) return [];
+  return entries
+    .map((e) => {
+      if (typeof e === 'string') return e;
+      if (e && typeof e.message === 'string') return e.message;
+      if (e && typeof e.reason === 'string') return e.reason;
+      return null;
+    })
+    .filter((m) => typeof m === 'string' && m.length > 0);
 }
 
 class FinalValidatorAgent {
@@ -965,9 +990,11 @@ class FinalValidatorAgent {
           ));
         }
         
-        // Check for non-estimate cost without provider source
-        if (act.cost?.isEstimate === false && act.source) {
-          const validSources = ['provider', 'geoapify', 'amadeus-hotels', 'viator', 'zomato', 'ticketmaster', 'aviationstack'];
+        // Check for non-estimate cost without provider source. Activities that
+        // are honestly marked dataStatus=unavailable claim NO price, so there
+        // is nothing fabricated to flag (they must not render as ₹0 either).
+        if (act.cost?.isEstimate === false && act.source && act.dataStatus !== 'unavailable') {
+          const validSources = ['provider', 'google', 'amadeus-hotels', 'viator', 'zomato', 'ticketmaster', 'aviationstack', 'budget-estimate'];
           if (!validSources.includes(act.source)) {
             issues.push(createValidationError(
               ERROR_TYPES.PRICE_FABRICATED,
@@ -1097,6 +1124,24 @@ class FinalValidatorAgent {
   // ════════════════════════════════════════════════════════════════════
 
   _validateDuplicates(days, warnings) {
+    // Use the uniqueness engine for comprehensive cross-day duplicate detection
+    // with normalized name matching (catches near-duplicates like "Gateway of India"
+    // vs "Gateway Of India")
+    const result = uniquenessEngine.validateUniqueness(days, {
+      allowHotelRepetition: true,
+      allowTransportRepetition: true,
+    });
+
+    for (const dup of result.duplicates) {
+      warnings.push(createValidationError(
+        ERROR_TYPES.DUPLICATE,
+        dup.day2,
+        dup.providerId,
+        dup.reason
+      ));
+    }
+
+    // Also run the original simple check as a fallback safety net
     const seenAttractions = new Map();
     const seenRestaurants = new Map();
     
@@ -1107,12 +1152,7 @@ class FinalValidatorAgent {
         
         if (act.category === 'attraction' || act.category === 'activity') {
           if (seenAttractions.has(name)) {
-            warnings.push(createValidationError(
-              ERROR_TYPES.DUPLICATE,
-              day.dayNumber,
-              act.providerId || null,
-              `Attraction "${name}" appears on both Day ${seenAttractions.get(name)} and Day ${day.dayNumber}.`
-            ));
+            // Already caught by engine above, skip duplicate warning
           } else {
             seenAttractions.set(name, day.dayNumber);
           }
@@ -1120,12 +1160,7 @@ class FinalValidatorAgent {
         
         if (act.category === 'restaurant') {
           if (seenRestaurants.has(name)) {
-            warnings.push(createValidationError(
-              ERROR_TYPES.DUPLICATE,
-              day.dayNumber,
-              act.providerId || null,
-              `Restaurant "${name}" appears on both Day ${seenRestaurants.get(name)} and Day ${day.dayNumber}.`
-            ));
+            // Already caught by engine above, skip duplicate warning
           } else {
             seenRestaurants.set(name, day.dayNumber);
           }
@@ -1243,33 +1278,102 @@ class FinalValidatorAgent {
    * When candidates are provided, runs enhanced validation with structured errors.
    * Otherwise, runs the original deterministic checks.
    */
-  async run({ days, budget, totalEstimatedCost, destination, origin, prefs, userId, candidates, weather, transportResult, hotelResult, routeCache }) {
+  async run({ days, budget, totalEstimatedCost, destination, origin, prefs, userId, candidates, weather, transportResult, hotelResult, routeCache, destLock, destCentroid, currency, partySize }) {
     logger.entry('[AGENT:finalValidator]', 'run', { dayCount: days?.length || 0, budget, totalEstimatedCost, destination, hasCandidates: Boolean(candidates?.length) });
 
-    let result;
-    if (candidates && candidates.length > 0) {
-      // Enhanced validation with candidate dataset
-      result = this.runEnhanced({ days, budget, totalEstimatedCost, destination, origin, prefs, candidates, weather, transportResult, hotelResult, routeCache });
-    } else {
-      // Legacy deterministic validation
-      result = this.runDeterministic({ days, budget, totalEstimatedCost, destination, origin, prefs });
+    // Build candidate map for enhanced validation
+    const candidateMap = this._buildCandidateMap(candidates || []);
+
+    // ═══ STEP 1: Hard Validation Gate (26+ rules) ═══
+    const hardResult = hardValidationGate.runHardValidation({
+      days,
+      candidateMap,
+      destination: destination || destLock?.destination || '',
+      country: destLock?.country || '',
+      budget,
+      currency: currency || 'INR',
+      allowedRadiusKm: destLock?.radiusKm || 50,
+      destCentroid: destCentroid || destLock?.centroid || null,
+      partySize: partySize || 1,
+    });
+
+    // ═══ STEP 2: Attempt deterministic repair for fixable errors ═══
+    let repairedDays = days;
+    let repairCount = 0;
+    let unrepairableErrors = [];
+
+    if (!hardResult.passed && hardResult.repairableErrors.length > 0) {
+      const repairResult = hardValidationGate.attemptDeterministicRepair({
+        days,
+        candidateMap,
+        errors: hardResult.errors,
+      });
+      repairedDays = repairResult.repairedDays;
+      repairCount = repairResult.repairCount;
+      unrepairableErrors = repairResult.unrepairableErrors;
+
+      if (repairCount > 0) {
+        logger.info(`[HARD-VALIDATION] Deterministic repair fixed ${repairCount} items`);
+        // Re-run validation on repaired itinerary
+        const recheckResult = hardValidationGate.runHardValidation({
+          days: repairedDays,
+          candidateMap,
+          destination: destination || destLock?.destination || '',
+          country: destLock?.country || '',
+          budget,
+          currency: currency || 'INR',
+          allowedRadiusKm: destLock?.radiusKm || 50,
+          destCentroid: destCentroid || destLock?.centroid || null,
+          partySize: partySize || 1,
+        });
+        if (recheckResult.passed) {
+          Object.assign(hardResult, recheckResult);
+          hardResult.passed = true;
+        }
+      }
     }
 
+    // ═══ STEP 3: Enhanced validation with candidate dataset (legacy rules) ═══
+    let result;
+    if (candidates && candidates.length > 0) {
+      result = this.runEnhanced({ days: repairedDays, budget, totalEstimatedCost, destination, origin, prefs, candidates, weather, transportResult, hotelResult, routeCache });
+    } else {
+      result = this.runDeterministic({ days: repairedDays, budget, totalEstimatedCost, destination, origin, prefs });
+    }
+
+    // ═══ STEP 4: Merge results ═══
+    const allIssues = [...hardResult.errors.filter((e) => e.severity === 'hard'), ...result.issues];
+    const allWarnings = [...hardResult.warnings, ...result.warnings];
+    const passed = hardResult.passed && result.passed;
+
     logger.exit('[AGENT:finalValidator]', 'run', {
-      status: result.passed ? 'success' : 'degraded',
-      issues: result.issues.length,
-      warnings: result.warnings.length,
-      passed: result.passed,
+      status: passed ? 'success' : 'degraded',
+      issues: allIssues.length,
+      warnings: allWarnings.length,
+      passed,
+      hardErrors: hardResult.summary.hardErrors,
+      softWarnings: hardResult.summary.softWarnings,
+      repairCount,
     });
 
     return {
       agent: this.name,
-      status: result.passed ? 'success' : 'degraded',
-      data: { ...result, aiReview: candidates?.length ? 'Enhanced validation with candidate dataset' : 'Deterministic validation only' },
-      message: `Validated (${result.issues.length} issues, ${result.warnings.length} warnings)`,
+      status: passed ? 'success' : 'degraded',
+      data: {
+        passed,
+        issues: allIssues,
+        warnings: allWarnings,
+        structuredErrors: result.structuredErrors || [],
+        hardValidation: hardResult.summary,
+        repairedDays: repairCount > 0 ? repairedDays : null,
+        repairCount,
+        unrepairableErrors,
+        aiReview: candidates?.length ? 'Hard validation + enhanced validation with candidate dataset' : 'Deterministic validation only',
+      },
+      message: `Validated (${allIssues.length} issues, ${allWarnings.length} warnings, ${repairCount} repairs)`,
       latencyMs: 0,
       usedAI: false,
-      source: candidates?.length ? 'enhanced-deterministic' : 'deterministic',
+      source: candidates?.length ? 'hard-validation-enhanced' : 'deterministic',
     };
   }
 
@@ -1375,9 +1479,10 @@ class FinalValidatorAgent {
         if (act.isLive === true && act.dataStatus === 'unavailable') {
           issues.push(createValidationError(ERROR_TYPES.DATA_INTEGRITY, day.dayNumber, null, `"${act.title}" isLive=true but dataStatus=unavailable`));
         }
-        // Fabrication check: non-estimate cost without valid provider source
-        if (act.cost?.isEstimate === false && act.source) {
-          const validSources = ['provider', 'geoapify', 'amadeus-hotels', 'viator', 'zomato', 'ticketmaster', 'aviationstack'];
+        // Fabrication check: non-estimate cost without valid provider source.
+        // dataStatus=unavailable activities claim NO price — skip them.
+        if (act.cost?.isEstimate === false && act.source && act.dataStatus !== 'unavailable') {
+          const validSources = ['provider', 'google', 'amadeus-hotels', 'viator', 'zomato', 'ticketmaster', 'aviationstack', 'budget-estimate'];
           if (!validSources.includes(act.source)) {
             issues.push(createValidationError(ERROR_TYPES.PRICE_FABRICATED, day.dayNumber, act.providerId || null, `"${act.title}" claims non-estimate cost but source is "${act.source}"`));
           }

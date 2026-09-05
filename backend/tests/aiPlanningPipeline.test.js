@@ -25,7 +25,7 @@ test('normalizeCandidates converts attractions to unified candidate format', () 
   assert.ok(candidates.length >= 1);
   const a = candidates.find((c) => c.providerId === 'a1');
   assert.ok(a, 'found attraction candidate by providerId');
-  assert.equal(a.provider, 'geoapify');
+  assert.equal(a.provider, 'google');
   assert.equal(a.type, 'attraction');
   assert.equal(a.name, 'Fort Aguada');
   assert.equal(a.price, 100);
@@ -37,9 +37,10 @@ test('normalizeCandidates converts attractions to unified candidate format', () 
 test('normalizeCandidates converts restaurants to unified candidate format', () => {
   const restaurants = [
     {
-      name: 'Test Restaurant',
+      name: 'Baga Beach Thali',
       placeId: 'r1',
-      types: ['restaurant'],
+      provider: 'google',
+      types: ['catering.restaurant', 'restaurant'],
       address: 'Baga, Goa',
       coordinates: { lat: 15.555, lng: 73.751 },
       rating: 4.2,
@@ -51,15 +52,16 @@ test('normalizeCandidates converts restaurants to unified candidate format', () 
   const r = candidates.find((c) => c.providerId === 'r1');
   assert.ok(r, 'found restaurant candidate');
   assert.equal(r.type, 'restaurant');
-  assert.equal(r.isEstimate, false); // Zomato-enriched
-  assert.equal(r.zomatoData.averageCostPerPerson, 500);
+  assert.equal(r.isEstimate, false); // Zomato-enriched real price
+  assert.equal(r.availability, 'live');
+  assert.equal(r.averageCostPerPerson, 500);
 });
 
 test('normalizeCandidates converts hotel to unified candidate format', () => {
   const hotelResult = {
     data: {
       isLive: true,
-      recommended: { name: 'Beach Resort', price: { amount: 2000, currency: 'INR' }, latitude: 15.5, longitude: 73.8, address: 'Baga, Goa' },
+      recommended: { id: 'goa-beach-001', provider: 'amadeus', isLive: true, name: 'Beach Resort', price: { amount: 2000, currency: 'INR' }, latitude: 15.5, longitude: 73.8, address: 'Baga, Goa' },
       hotels: [],
     },
   };
@@ -107,21 +109,21 @@ test('normalizeCandidates converts Ticketmaster events to unified candidate form
 
 test('resolveProviderIds resolves activity by provider + providerId', () => {
   const candidates = [
-    { id: 'geoapify:a1', provider: 'geoapify', providerId: 'a1', type: 'attraction', name: 'Fort Aguada', latitude: 15.49, longitude: 73.76, price: 100, currency: 'INR', rating: 4.5, address: 'Candolim, Goa', source: 'geoapify', isLive: true, isEstimate: false },
+    { id: 'google:a1', provider: 'google', providerId: 'a1', type: 'attraction', name: 'Fort Aguada', latitude: 15.49, longitude: 73.76, price: 100, currency: 'INR', rating: 4.5, address: 'Candolim, Goa', source: 'google', isLive: true, isEstimate: false },
   ];
   const aiDays = [
     {
       date: '2025-06-01',
       theme: 'Beach & Heritage',
       items: [
-        { type: 'attraction', provider: 'geoapify', providerId: 'a1', startTime: '09:30', endTime: '11:30', reason: 'Historic fort with great views' },
+        { type: 'attraction', provider: 'google', providerId: 'a1', startTime: '09:30', endTime: '11:30', reason: 'Historic fort with great views' },
       ],
     },
   ];
   const { resolved, resolvedCount } = resolveProviderIds(aiDays, candidates);
   assert.equal(resolvedCount, 1);
   const act = resolved[0].activities[0];
-  assert.equal(act.provider, 'geoapify');
+  assert.equal(act.provider, 'google');
   assert.equal(act.providerId, 'a1');
   assert.equal(act.coordinates.lat, 15.49);
   assert.equal(act.coordinates.lng, 73.76);
@@ -135,14 +137,14 @@ test('resolveProviderIds resolves activity by provider + providerId', () => {
 
 test('resolveProviderIds falls back to name matching when providerId is a name', () => {
   const candidates = [
-    { id: 'geoapify:a1', provider: 'geoapify', providerId: 'a1', type: 'attraction', name: 'Fort Aguada', latitude: 15.49, longitude: 73.76, price: 0, currency: 'INR', address: 'Candolim, Goa', source: 'geoapify', isLive: true, isEstimate: true },
+    { id: 'google:a1', provider: 'google', providerId: 'a1', type: 'attraction', name: 'Fort Aguada', latitude: 15.49, longitude: 73.76, price: 0, currency: 'INR', address: 'Candolim, Goa', source: 'google', isLive: true, isEstimate: true },
   ];
   const aiDays = [
     {
       date: '2025-06-01',
       theme: 'Heritage',
       items: [
-        { type: 'attraction', provider: 'geoapify', providerId: 'Fort Aguada', startTime: '09:30', endTime: '11:30', reason: 'Historic fort' },
+        { type: 'attraction', provider: 'google', providerId: 'Fort Aguada', startTime: '09:30', endTime: '11:30', reason: 'Historic fort' },
       ],
     },
   ];
@@ -170,14 +172,14 @@ test('resolveProviderIds skips items that cannot be resolved', () => {
 
 test('resolveProviderIds populates openingHours from candidate', () => {
   const candidates = [
-    { id: 'geoapify:a1', provider: 'geoapify', providerId: 'a1', type: 'attraction', name: 'Fort Aguada', latitude: 15.49, longitude: 73.76, price: 0, address: 'Candolim', source: 'geoapify', isLive: true, isEstimate: true, openingHours: { periods: [{ days: ['all'], open: '09:00', close: '18:00' }] } },
+    { id: 'google:a1', provider: 'google', providerId: 'a1', type: 'attraction', name: 'Fort Aguada', latitude: 15.49, longitude: 73.76, price: 0, address: 'Candolim', source: 'google', isLive: true, isEstimate: true, openingHours: { periods: [{ days: ['all'], open: '09:00', close: '18:00' }] } },
   ];
   const aiDays = [
     {
       date: '2025-06-01',
       theme: 'Heritage',
       items: [
-        { type: 'attraction', provider: 'geoapify', providerId: 'a1', startTime: '09:30', endTime: '11:30', reason: 'Historic fort with opening hours' },
+        { type: 'attraction', provider: 'google', providerId: 'a1', startTime: '09:30', endTime: '11:30', reason: 'Historic fort with opening hours' },
       ],
     },
   ];
@@ -238,14 +240,14 @@ test('rebuildCosts computes perPerson on each activity cost', () => {
 
 test('enhanced validator detects provider ID not found in candidate dataset', () => {
   const candidates = [
-    { id: 'geoapify:a1', provider: 'geoapify', providerId: 'a1', type: 'attraction', name: 'Fort Aguada' },
+    { id: 'google:a1', provider: 'google', providerId: 'a1', type: 'attraction', name: 'Fort Aguada' },
   ];
   const days = [
     {
       dayNumber: 1,
       date: new Date('2025-06-01'),
       activities: [
-        { title: 'Fake Place', place: 'Fake Place', time: '09:00', category: 'attraction', provider: 'geoapify', providerId: 'nonexistent', cost: { amount: 100, isEstimate: true }, dataStatus: 'live' },
+        { title: 'Fake Place', place: 'Fake Place', time: '09:00', category: 'attraction', provider: 'google', providerId: 'nonexistent', cost: { amount: 100, isEstimate: true }, dataStatus: 'live' },
       ],
     },
   ];
@@ -447,40 +449,40 @@ test('enhanced validator returns duplicatesFound flag', () => {
 // ══════════════════════════════════════════════════════════════════════
 
 const CANDIDATE_ATTRACTION_1 = {
-  id: 'geoapify:fort-aguada', provider: 'geoapify', providerId: 'fort-aguada',
+  id: 'google:fort-aguada', provider: 'google', providerId: 'fort-aguada',
   type: 'attraction', name: 'Fort Aguada', description: 'tourist_attraction',
   latitude: 15.493, longitude: 73.763, price: 100, currency: 'INR',
   rating: 4.5, address: 'Candolim, Goa', suburb: 'Candolim',
   openingHours: { periods: [{ open: { day: 0, time: '09:00' }, close: { day: 0, time: '18:00' } }] },
-  source: 'geoapify', isLive: true, isEstimate: false,
+  source: 'google', isLive: true, isEstimate: false,
 };
 const CANDIDATE_ATTRACTION_2 = {
-  id: 'geoapify:baga-beach', provider: 'geoapify', providerId: 'baga-beach',
+  id: 'google:baga-beach', provider: 'google', providerId: 'baga-beach',
   type: 'attraction', name: 'Baga Beach', description: 'natural_feature',
   latitude: 15.556, longitude: 73.751, price: 0, currency: 'INR',
   rating: 4.2, address: 'Baga, Goa', suburb: 'Baga',
-  source: 'geoapify', isLive: true, isEstimate: false,
+  source: 'google', isLive: true, isEstimate: false,
 };
 const CANDIDATE_RESTAURANT_1 = {
-  id: 'geoapify:resto-alpha', provider: 'geoapify', providerId: 'resto-alpha',
+  id: 'google:resto-alpha', provider: 'google', providerId: 'resto-alpha',
   type: 'restaurant', name: 'Resto Alpha', description: 'Indian',
   latitude: 15.555, longitude: 73.755, price: 500, currency: 'INR',
   rating: 4.0, address: 'Baga, Goa', suburb: 'Baga',
-  source: 'geoapify', isLive: true, isEstimate: false,
+  source: 'google', isLive: true, isEstimate: false,
 };
 const CANDIDATE_RESTAURANT_2 = {
-  id: 'geoapify:resto-beta', provider: 'geoapify', providerId: 'resto-beta',
+  id: 'google:resto-beta', provider: 'google', providerId: 'resto-beta',
   type: 'restaurant', name: 'Resto Beta', description: 'Chinese',
   latitude: 15.560, longitude: 73.750, price: 600, currency: 'INR',
   rating: 4.3, address: 'Calangute, Goa', suburb: 'Calangute',
-  source: 'geoapify', isLive: true, isEstimate: false,
+  source: 'google', isLive: true, isEstimate: false,
 };
 const CANDIDATE_RESTAURANT_3 = {
-  id: 'geoapify:resto-gamma', provider: 'geoapify', providerId: 'resto-gamma',
+  id: 'google:resto-gamma', provider: 'google', providerId: 'resto-gamma',
   type: 'restaurant', name: 'Resto Gamma', description: 'Seafood',
   latitude: 15.540, longitude: 73.760, price: 700, currency: 'INR',
   rating: 4.1, address: 'Anjuna, Goa', suburb: 'Anjuna',
-  source: 'geoapify', isLive: true, isEstimate: false,
+  source: 'google', isLive: true, isEstimate: false,
 };
 
 const TEST_CANDIDATES = [
@@ -493,7 +495,7 @@ test('runEnhanced detects PROVIDER_ID_NOT_FOUND when candidate does not exist', 
     dayNumber: 1, date: new Date('2025-06-01'),
     activities: [
       { title: 'Ghost Place', time: '09:00', category: 'attraction',
-        provider: 'geoapify', providerId: 'nonexistent-id',
+        provider: 'google', providerId: 'nonexistent-id',
         cost: { amount: 0, isEstimate: true }, dataStatus: 'estimate' },
     ],
   }];
@@ -505,7 +507,7 @@ test('runEnhanced detects PROVIDER_ID_NOT_FOUND when candidate does not exist', 
   assert.equal(result.passed, false);
   const providerErr = result.structuredErrors.find(e => e.type === ERROR_TYPES.PROVIDER_ID_NOT_FOUND);
   assert.ok(providerErr, 'found PROVIDER_ID_NOT_FOUND error');
-  assert.equal(providerErr.providerId, 'geoapify:nonexistent-id');
+  assert.equal(providerErr.providerId, 'google:nonexistent-id');
   assert.ok(providerErr.availableAlternatives, 'has availableAlternatives');
   assert.ok(providerErr.availableAlternatives.length > 0, 'alternatives are non-empty');
   // Alternatives should be attractions (same category)
@@ -530,7 +532,7 @@ test('runEnhanced detects PROVIDER_ID_WRONG_PROVIDER when provider does not matc
   const wrongProviderErr = result.structuredErrors.find(e => e.type === ERROR_TYPES.PROVIDER_ID_WRONG_PROVIDER);
   assert.ok(wrongProviderErr, 'found PROVIDER_ID_WRONG_PROVIDER error');
   assert.ok(wrongProviderErr.message.includes('ticketmaster'));
-  assert.ok(wrongProviderErr.message.includes('geoapify'));
+  assert.ok(wrongProviderErr.message.includes('google'));
 });
 
 test('runEnhanced detects restaurant duplication when alternatives exist', () => {
@@ -538,15 +540,15 @@ test('runEnhanced detects restaurant duplication when alternatives exist', () =>
     {
       dayNumber: 1, date: new Date('2025-06-01'),
       activities: [
-        { title: 'Fort Aguada', time: '09:00', category: 'attraction', provider: 'geoapify', providerId: 'fort-aguada', cost: { amount: 100, isEstimate: false }, dataStatus: 'live' },
-        { title: 'Resto Alpha Lunch', time: '12:30', category: 'restaurant', provider: 'geoapify', providerId: 'resto-alpha', cost: { amount: 500, isEstimate: false }, dataStatus: 'live' },
+        { title: 'Fort Aguada', time: '09:00', category: 'attraction', provider: 'google', providerId: 'fort-aguada', cost: { amount: 100, isEstimate: false }, dataStatus: 'live' },
+        { title: 'Resto Alpha Lunch', time: '12:30', category: 'restaurant', provider: 'google', providerId: 'resto-alpha', cost: { amount: 500, isEstimate: false }, dataStatus: 'live' },
       ],
     },
     {
       dayNumber: 2, date: new Date('2025-06-02'),
       activities: [
-        { title: 'Baga Beach', time: '09:00', category: 'attraction', provider: 'geoapify', providerId: 'baga-beach', cost: { amount: 0, isEstimate: false }, dataStatus: 'live' },
-        { title: 'Resto Alpha Dinner', time: '19:00', category: 'restaurant', provider: 'geoapify', providerId: 'resto-alpha', cost: { amount: 500, isEstimate: false }, dataStatus: 'live' },
+        { title: 'Baga Beach', time: '09:00', category: 'attraction', provider: 'google', providerId: 'baga-beach', cost: { amount: 0, isEstimate: false }, dataStatus: 'live' },
+        { title: 'Resto Alpha Dinner', time: '19:00', category: 'restaurant', provider: 'google', providerId: 'resto-alpha', cost: { amount: 500, isEstimate: false }, dataStatus: 'live' },
       ],
     },
   ];
@@ -570,17 +572,17 @@ test('runEnhanced detects restaurant duplication when alternatives exist', () =>
 
 test('runEnhanced detects MISSING_PROVIDER_DATA when candidate has incomplete fields', () => {
   const incompleteCandidate = {
-    id: 'geoapify:incomplete', provider: 'geoapify', providerId: 'incomplete',
+    id: 'google:incomplete', provider: 'google', providerId: 'incomplete',
     type: 'attraction', name: '', description: '',
     latitude: null, longitude: null, price: 0, currency: 'INR',
     rating: null, address: '',
-    source: 'geoapify', isLive: false, isEstimate: true,
+    source: 'google', isLive: false, isEstimate: true,
   };
   const days = [{
     dayNumber: 1, date: new Date('2025-06-01'),
     activities: [{
       title: 'Incomplete Place', time: '09:00', category: 'attraction',
-      provider: 'geoapify', providerId: 'incomplete',
+      provider: 'google', providerId: 'incomplete',
       cost: { amount: 0, isEstimate: true }, dataStatus: 'estimate',
     }],
   }];
@@ -598,10 +600,10 @@ test('runEnhanced passes with valid candidates and proper provider references', 
     {
       dayNumber: 1, date: new Date('2025-06-01'),
       activities: [
-        { title: 'Fort Aguada', time: '09:00', category: 'attraction', provider: 'geoapify', providerId: 'fort-aguada', cost: { amount: 100, isEstimate: false }, dataStatus: 'live', coordinates: { lat: 15.493, lng: 73.763 } },
-        { title: 'Resto Alpha Lunch', time: '12:30', category: 'restaurant', provider: 'geoapify', providerId: 'resto-alpha', cost: { amount: 500, isEstimate: false }, dataStatus: 'live', coordinates: { lat: 15.555, lng: 73.755 } },
-        { title: 'Baga Beach', time: '15:00', category: 'attraction', provider: 'geoapify', providerId: 'baga-beach', cost: { amount: 0, isEstimate: false }, dataStatus: 'live', coordinates: { lat: 15.556, lng: 73.751 } },
-        { title: 'Resto Beta Dinner', time: '19:00', category: 'restaurant', provider: 'geoapify', providerId: 'resto-beta', cost: { amount: 600, isEstimate: false }, dataStatus: 'live', coordinates: { lat: 15.560, lng: 73.750 } },
+        { title: 'Fort Aguada', time: '09:00', category: 'attraction', provider: 'google', providerId: 'fort-aguada', cost: { amount: 100, isEstimate: false }, dataStatus: 'live', coordinates: { lat: 15.493, lng: 73.763 } },
+        { title: 'Resto Alpha Lunch', time: '12:30', category: 'restaurant', provider: 'google', providerId: 'resto-alpha', cost: { amount: 500, isEstimate: false }, dataStatus: 'live', coordinates: { lat: 15.555, lng: 73.755 } },
+        { title: 'Baga Beach', time: '15:00', category: 'attraction', provider: 'google', providerId: 'baga-beach', cost: { amount: 0, isEstimate: false }, dataStatus: 'live', coordinates: { lat: 15.556, lng: 73.751 } },
+        { title: 'Resto Beta Dinner', time: '19:00', category: 'restaurant', provider: 'google', providerId: 'resto-beta', cost: { amount: 600, isEstimate: false }, dataStatus: 'live', coordinates: { lat: 15.560, lng: 73.750 } },
       ],
     },
   ];
@@ -620,13 +622,13 @@ test('structured errors contain day and providerId fields for replanning', () =>
     {
       dayNumber: 1, date: new Date('2025-06-01'),
       activities: [
-        { title: 'Fort Aguada', time: '09:00', category: 'attraction', provider: 'geoapify', providerId: 'fort-aguada', cost: { amount: 100, isEstimate: false }, dataStatus: 'live' },
+        { title: 'Fort Aguada', time: '09:00', category: 'attraction', provider: 'google', providerId: 'fort-aguada', cost: { amount: 100, isEstimate: false }, dataStatus: 'live' },
       ],
     },
     {
       dayNumber: 2, date: new Date('2025-06-02'),
       activities: [
-        { title: 'Fort Aguada Again', time: '09:00', category: 'attraction', provider: 'geoapify', providerId: 'fort-aguada', cost: { amount: 100, isEstimate: false }, dataStatus: 'live' },
+        { title: 'Fort Aguada Again', time: '09:00', category: 'attraction', provider: 'google', providerId: 'fort-aguada', cost: { amount: 100, isEstimate: false }, dataStatus: 'live' },
       ],
     },
   ];

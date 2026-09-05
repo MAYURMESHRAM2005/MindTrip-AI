@@ -1,17 +1,25 @@
 import ApiResponse from '../utils/ApiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import mapsProvider from '../providers/maps.provider.js';
-import placesProvider from '../providers/places.provider.js';
+import geocodeProvider from '../providers/googleGeocoding.provider.js';
+import routesProvider from '../providers/googleRoutes.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
 import { haversineKm } from '../utils/geo.js';
 
 export const geocode = asyncHandler(async (req, res) => {
-  const result = await mapsProvider.geocode(req.query.address);
-  res.json(ApiResponse.ok(result.message, { geocode: result.data, isLive: result.isLive }));
+  const result = await geocodeProvider.geocode(req.query.address);
+  // Always include the provider message in the payload: clients show the real
+  // failure reason (e.g. billing/permission denied) instead of guessing from
+  // isLive alone and reporting a generic "no results found".
+  res.json(ApiResponse.ok(result.message, {
+    geocode: result.data,
+    isLive: result.isLive,
+    message: result.message,
+  }));
 });
 
 export const autocomplete = asyncHandler(async (req, res) => {
   const { q, type, limit } = req.query;
-  const result = await mapsProvider.autocomplete(q, { type, limit });
+  const result = await geocodeProvider.autocomplete(q, { type, limit });
   if (!result.isLive) {
     return res.json(ApiResponse.ok(result.message, { suggestions: [], isLive: false, message: result.message }));
   }
@@ -22,13 +30,13 @@ export const directions = asyncHandler(async (req, res) => {
   const { origin, destination, mode, alternatives } = req.query;
   // Accept both the URL string form (?alternatives=false) and coerced boolean.
   const wantAlternatives = alternatives !== 'false' && alternatives !== false && alternatives !== '0';
-  const result = await mapsProvider.directions(origin, destination, mode, wantAlternatives);
+  const result = await routesProvider.directions(origin, destination, mode, wantAlternatives);
 
-  // When Geoapify is unavailable, provide a straight-line distance estimate,
+  // When routing is unavailable, provide a straight-line distance estimate,
   // clearly labelled as an approximation.
   if (!result.isLive) {
-    const g1 = await mapsProvider.geocode(origin);
-    const g2 = await mapsProvider.geocode(destination);
+    const g1 = await geocodeProvider.geocode(origin);
+    const g2 = await geocodeProvider.geocode(destination);
     let fallback = null;
     if (g1.isLive && g2.isLive) {
       const km = haversineKm(g1.data.lat, g1.data.lng, g2.data.lat, g2.data.lng);
@@ -61,6 +69,10 @@ export const nearbyPoints = asyncHandler(async (req, res) => {
   const typeList = (types || 'hospital,police,pharmacy,atm,transit_station').split(',');
   const results = {};
   let allUnavailable = true;
+  // Collect the real failure reasons so an all-failed search surfaces the
+  // actual cause (e.g. billing / permission denied) instead of a generic
+  // "no nearby places" message.
+  const failureReasons = new Set();
 
   // Support all map categories (up to 10) — hotels, restaurants, attractions, etc.
   for (const type of typeList.slice(0, 10)) {
@@ -72,13 +84,22 @@ export const nearbyPoints = asyncHandler(async (req, res) => {
       limit: 8,
     });
     results[type] = r.data || [];
-    if (r.isLive) allUnavailable = false;
+    if (r.isLive) {
+      allUnavailable = false;
+    } else if (r.message && !/no results|no nearby/i.test(r.message)) {
+      failureReasons.add(r.message.replace(/^Live data unavailable: /, ''));
+    }
   }
 
+  const summary = allUnavailable
+    ? `Live data unavailable${failureReasons.size ? `: ${[...failureReasons][0]}` : ''}`
+    : 'Nearby places';
+
   res.json(
-    ApiResponse.ok(allUnavailable ? 'Nearby live data unavailable' : 'Nearby places', {
+    ApiResponse.ok(summary, {
       results,
       isLive: !allUnavailable,
+      message: summary,
     })
   );
 });

@@ -6,13 +6,14 @@ import {
   CloudSun, Map as MapIcon, CornerDownLeft,
 } from 'lucide-react';
 import { mapsApi } from '../services/apiClient';
+import useDebouncedValue from '../hooks/useDebouncedValue';
 import { cn } from '../utils/format';
 import { useI18n } from '../utils/i18n';
 
 /**
  * Global search in the topbar — "Search destinations, hotels, flights…".
  *
- * Debounces typing, queries the backend /maps/autocomplete endpoint (Geoapify)
+ * Debounces typing, queries the backend /maps/autocomplete endpoint (Google Places)
  * and shows matching places. Every suggestion can be jumped into with a
  * quick action (plan a trip, flights, hotels, restaurants, weather, maps);
  * those pages read the value from their URL query param on mount.
@@ -40,34 +41,38 @@ function placeSubtitle(s) {
 export default function GlobalSearch({ className, autoFocus = false, onNavigated }) {
   const { t } = useI18n();
   const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
+  // One request per 400ms pause of typing — never one per keystroke.
+  const debounced = useDebouncedValue(query, 400);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
   const blurTimer = useRef(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const t = setTimeout(() => setDebounced(query.trim()), 250);
-    return () => clearTimeout(t);
-  }, [query]);
-
   useEffect(() => () => clearTimeout(blurTimer.current), []);
 
   const { data, isFetching } = useQuery({
     queryKey: ['global-search', debounced],
-    queryFn: () => mapsApi.autocomplete({ q: debounced, limit: 6 }).then((r) => r.data.data),
+    // Pass react-query's AbortSignal so superseded in-flight requests are
+    // cancelled instead of completing and being thrown away.
+    queryFn: ({ signal }) => mapsApi.autocomplete({ q: debounced, limit: 6 }, { signal }).then((r) => r.data.data),
     enabled: debounced.length >= 2,
     staleTime: 60_000,
   });
 
   const suggestions = data?.isLive ? data.suggestions || [] : [];
+  // When the backend could not search (key/billing/permission problem, quota,
+  // outage) it reports isLive:false with an explanatory message. Surface it
+  // instead of a misleading "no matching places" hint. Enter still plans a
+  // trip to the typed query either way.
+  const searchError = data && data.isLive === false ? data.message || t('Live data unavailable') : null;
   const showDropdown = open && debounced.length >= 2;
 
   const go = (path) => {
     navigate(path);
     setOpen(false);
+    // Clearing the query also resets the debounced value (derived from it),
+    // so the dropdown closes without any extra autocomplete request.
     setQuery('');
-    setDebounced('');
     setHighlight(-1);
     onNavigated?.();
   };
@@ -143,6 +148,11 @@ export default function GlobalSearch({ className, autoFocus = false, onNavigated
           {isFetching ? (
             <p className="flex items-center gap-2 px-3.5 py-3 text-xs text-slate-400">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t('Searching places…')}
+            </p>
+          ) : searchError ? (
+            <p className="flex items-center gap-1.5 px-3.5 py-3 text-xs text-slate-500">
+              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+              <span className="min-w-0">{searchError}</span>
             </p>
           ) : suggestions.length === 0 ? (
             <p className="px-3.5 py-3 text-xs text-slate-400">

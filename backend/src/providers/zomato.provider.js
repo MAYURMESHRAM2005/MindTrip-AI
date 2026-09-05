@@ -152,8 +152,8 @@ export async function searchNearby({ lat, lng, radius = 5000, limit = 15 }) {
 }
 
 /**
- * Batch-enrich Geoapify restaurants with Zomato real data.
- * Matches Geoapify restaurants by name to Zomato results and returns
+ * Batch-enrich Google restaurants with Zomato real data.
+ * Matches Google restaurants by name to Zomato results and returns
  * a Map of lowercase restaurant name → Zomato data.
  *
  * @param {string} destination — City/area name

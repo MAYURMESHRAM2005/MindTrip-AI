@@ -7,7 +7,7 @@ import PlaceAutocomplete from '../components/PlaceAutocomplete';
 import Button from '../components/ui/Button';
 import ProviderNotice from '../components/ProviderNotice';
 import { Spinner } from '../components/ui/Spinner';
-import { geoapifyService, NEARBY_CATEGORIES } from '../services/geoapifyService';
+import { googleService, NEARBY_CATEGORIES } from '../services/googleService';
 import { getCurrentWeather, formatSunTime, weatherIconUrl } from '../services/weatherService';
 import { useI18n } from '../utils/i18n';
 
@@ -30,13 +30,12 @@ export default function Maps() {
   const [origin, setOrigin] = useState('');
   // Topbar search (?destination=Goa) auto-loads the map on mount.
   const [search, setSearch] = useState(() => queryDest() || null);
-  const [nearby, setNearby] = useState({ results: {}, isLive: false, loading: false });
   const [route, setRoute] = useState({ loading: false, isLive: false, message: '' });
 
   // Geocode the destination (cached by react-query → no duplicate requests)
   const { data: geocode, isLoading: geocoding, refetch: refetchGeocode } = useQuery({
-    queryKey: ['geoapify-geocode', search],
-    queryFn: () => geoapifyService.geocode(search),
+    queryKey: ['google-geocode', search],
+    queryFn: () => googleService.geocode(search),
     enabled: Boolean(search),
   });
 
@@ -55,12 +54,21 @@ export default function Maps() {
     setRoute({ loading: false, isLive: false, message: '' });
   }, [search]);
 
-  // Auto-load nearby places once the destination resolves
-  useEffect(() => {
-    if (!center) return;
-    setNearby((n) => ({ ...n, loading: true }));
-    geoapifyService.getNearby({ lat: center.lat, lng: center.lng, radius: 6000 }).then((r) => setNearby({ ...r, loading: false }));
-  }, [center?.lat, center?.lng]);
+  // Nearby places (8 categories) load once per destination and are cached by
+  // react-query — revisiting the page or a StrictMode double-mount never
+  // re-fires the 8 Places requests.
+  const { data: nearbyData, isFetching: nearbyFetching } = useQuery({
+    queryKey: ['google-nearby', center?.lat, center?.lng],
+    queryFn: () => googleService.getNearby({ lat: center.lat, lng: center.lng, radius: 6000 }),
+    enabled: Boolean(center),
+    staleTime: 5 * 60_000,
+  });
+  const nearby = {
+    results: nearbyData?.results || {},
+    isLive: nearbyData?.isLive || false,
+    message: nearbyData?.message || '',
+    loading: nearbyFetching || (!nearbyData && Boolean(center)),
+  };
 
   const markers = useMemo(() => {
     const list = [];
@@ -83,7 +91,7 @@ export default function Maps() {
   const getRoute = async () => {
     if (!origin || !search) return;
     setRoute({ loading: true, isLive: false, message: '' });
-    const result = await geoapifyService.getRoute(origin, search, 'drive');
+    const result = await googleService.getRoute(origin, search, 'drive');
     setRoute({ ...result, loading: false });
   };
 
@@ -91,7 +99,7 @@ export default function Maps() {
 
   return (
     <div>
-      <PageHeader icon={MapIcon} title={t('Maps & Traffic')} subtitle={t('Geoapify geocoding, routing and nearby places on an OpenStreetMap base.')} />
+      <PageHeader icon={MapIcon} title={t('Maps & Traffic')} subtitle={t('Google Maps geocoding, routing and nearby places on an interactive map.')} />
 
       <div className="card mb-6 flex flex-wrap items-end gap-3 p-5">
         <div className="min-w-[200px] flex-1">
@@ -112,7 +120,7 @@ export default function Maps() {
         <ProviderNotice
           title={t('Map data unavailable')}
           message={geocode?.message || t('Could not geocode this destination.')}
-          externalSources={[{ name: 'Geoapify', url: 'https://www.geoapify.com' }, { name: 'OpenStreetMap', url: 'https://www.openstreetmap.org' }]}
+          externalSources={[{ name: 'Google Maps', url: 'https://maps.google.com' }]}
           action={search ? { label: t('Retry'), onClick: () => refetchGeocode() } : null}
         />
       )}

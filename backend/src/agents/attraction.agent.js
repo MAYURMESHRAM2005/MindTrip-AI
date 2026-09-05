@@ -1,9 +1,9 @@
-import placesProvider from '../providers/places.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
 import viatorProvider from '../providers/viator.provider.js';
 import logger from '../utils/logger.js';
 
 /**
- * Attraction Agent: real Places attractions from Geoapify.
+ * Attraction Agent: real Places attractions from Google Places.
  * Now purely provider-based — no Gemini calls. Attractions are returned
  * directly from the provider.
  */
@@ -116,7 +116,7 @@ class AttractionAgent {
         attractions,
         isLive: true,
         dailyPlan: [],
-        notes: `Attraction data from Geoapify (${attractions.length} options, ${attractions.filter((a) => a.openingHours).length} with opening hours, ${withViatorPricing} with Viator pricing)`,
+        notes: `Attraction data from Google Places (${attractions.length} options, ${attractions.filter((a) => a.openingHours).length} with opening hours, ${withViatorPricing} with Viator pricing)`,
         viatorEnriched: withViatorPricing,
       },
       message: `Attraction data from provider (${attractions.length} options, ${withViatorPricing} with real pricing)`,

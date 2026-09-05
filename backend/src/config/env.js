@@ -1,10 +1,12 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ENV_FILE = path.resolve(__dirname, '../../.env');
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: ENV_FILE });
 
 /**
  * Central environment configuration.
@@ -36,7 +38,9 @@ const env = {
   GROQ_MODEL: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
   GROQ_TIMEOUT_MS: parseInt(process.env.GROQ_TIMEOUT_MS, 10) || 60000,
 
-  GEOAPIFY_API_KEY: process.env.GEOAPIFY_API_KEY || '',
+  // Google Maps Platform (server-side key — never expose to the browser).
+  // Enables Google Geocoding API, Places API and Routes API.
+  GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY || '',
   OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || '',
 
   AVIATIONSTACK_API_KEY: process.env.AVIATIONSTACK_API_KEY || '',
@@ -75,6 +79,47 @@ const env = {
   SMTP_PASS: process.env.SMTP_PASS || '',
   EMAIL_FROM: process.env.EMAIL_FROM || 'TravelMind AI <no-reply@travelmind.app>',
 };
+
+// ── SAFE STARTUP DIAGNOSTIC (fingerprints only — NEVER the full key) ──
+// Shows which Google Maps key the server will actually use and flags the
+// classic silent failure: a GOOGLE_MAPS_API_KEY exported in the shell / host
+// environment shadows backend/.env because dotenv never overrides a variable
+// that is already set. If the fingerprints differ, unset the exported
+// variable (e.g. `unset GOOGLE_MAPS_API_KEY`) or fix the host env before
+// restarting — otherwise edits to backend/.env have no effect.
+if (process.env.NODE_ENV !== 'test') {
+  const fp = (s) => (s && s.length > 6 ? `${s.slice(0, 6)}...${s.slice(-4)}` : '(empty)');
+  const presence = (name) => (process.env[name] !== undefined && process.env[name] !== '' ? 'SET' : 'NOT_SET');
+  const mapsKey = process.env.GOOGLE_MAPS_API_KEY || '';
+
+  let fileKey = '';
+  try {
+    const parsed = dotenv.parse(fs.readFileSync(ENV_FILE));
+    fileKey = parsed.GOOGLE_MAPS_API_KEY || '';
+  } catch {
+    /* .env may not exist — nothing to compare */
+  }
+
+  console.log('\n[GOOGLE MAPS CONFIG DIAG]');
+  // FIREBASE_PROJECT_ID only drives Firebase Auth (Google sign-in). Google
+  // Maps Platform calls are keyed by the API key alone, so this value does
+  // NOT need to match the Cloud project that issued the Maps key.
+  console.log('  firebaseProjectId = ' + (process.env.FIREBASE_PROJECT_ID || '(not set — Google sign-in only)'));
+  console.log('  keyVariable       = GOOGLE_MAPS_API_KEY');
+  console.log('  keyPrefix         = ' + fp(mapsKey).split('...')[0]);
+  console.log('  keySuffix         = ' + fp(mapsKey).split('...')[1]);
+  console.log('  GOOGLE_MAPS_API_KEY        = ' + presence('GOOGLE_MAPS_API_KEY'));
+  console.log('  VITE_GOOGLE_MAPS_BROWSER_KEY = ' + presence('VITE_GOOGLE_MAPS_BROWSER_KEY'));
+  console.log('  GOOGLE_MAPS_BROWSER_KEY    = ' + presence('GOOGLE_MAPS_BROWSER_KEY'));
+  console.log('  GOOGLE_MAPS_SERVER_KEY     = ' + presence('GOOGLE_MAPS_SERVER_KEY'));
+  if (fileKey && mapsKey && fileKey !== mapsKey) {
+    console.log('  ⚠ OVERRIDE DETECTED: the running process uses a key that is NOT the one in ' + ENV_FILE);
+    console.log('    file value     = ' + fp(fileKey));
+    console.log('    effective value = ' + fp(mapsKey) + ' (exported in shell / set by host)');
+    console.log('    Fix: unset GOOGLE_MAPS_API_KEY in the shell (or host env) and restart.');
+  }
+  console.log('[/GOOGLE MAPS CONFIG DIAG]\n');
+}
 
 export const isProduction = env.NODE_ENV === 'production';
 export const isDev = env.NODE_ENV === 'development';

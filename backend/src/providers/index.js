@@ -1,11 +1,13 @@
 import env from '../config/env.js';
+import { isGoogleMapsConfigured } from '../config/googleMaps.js';
 import flightProvider from './flight.provider.js';
 import trainProvider from './train.provider.js';
 import busProvider from './bus.provider.js';
 import hotelProvider from './hotel.provider.js';
-import placesProvider from './places.provider.js';
+import googlePlacesProvider from './googlePlaces.provider.js';
+import googleGeocodingProvider from './googleGeocoding.provider.js';
+import googleRoutesProvider from './googleRoutes.provider.js';
 import weatherProvider from './weather.provider.js';
-import mapsProvider from './maps.provider.js';
 import currencyProvider from './currency.provider.js';
 
 /**
@@ -17,17 +19,22 @@ export const providers = {
   trainProvider,
   busProvider,
   hotelProvider,
-  placesProvider,
+  placesProvider: googlePlacesProvider,
+  geocodingProvider: googleGeocodingProvider,
+  routesProvider: googleRoutesProvider,
   weatherProvider,
-  mapsProvider,
   currencyProvider,
 };
 
 export function providerStatuses() {
+  const mapsConfigured = isGoogleMapsConfigured();
   return [
     { name: 'Gemini AI', configured: Boolean(env.GEMINI_API_KEY), kind: 'ai' },
     { name: 'Groq AI (Fallback)', configured: Boolean(env.GROQ_API_KEY), kind: 'ai' },
-    { name: 'Geoapify (Maps & Places)', configured: Boolean(env.GEOAPIFY_API_KEY), kind: 'maps' },
+    { name: 'Google Maps JavaScript API', configured: mapsConfigured, kind: 'maps', api: 'Google Maps Platform' },
+    { name: 'Google Geocoding API', configured: mapsConfigured, kind: 'maps', api: 'Google Maps Platform' },
+    { name: 'Google Places API', configured: mapsConfigured, kind: 'maps', api: 'Google Maps Platform' },
+    { name: 'Google Routes API', configured: mapsConfigured, kind: 'maps', api: 'Google Maps Platform' },
     { name: 'OpenWeatherMap', configured: Boolean(env.OPENWEATHER_API_KEY), kind: 'weather' },
     { name: 'AviationStack (Flights)', configured: Boolean(env.AVIATIONSTACK_API_KEY), kind: 'flights' },
     { name: 'Amadeus (Hotels)', configured: Boolean(env.AMADEUS_CLIENT_ID && env.AMADEUS_CLIENT_SECRET), kind: 'hotels' },

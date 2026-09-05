@@ -58,7 +58,7 @@ const logger = {
 
   /**
    * Structured provider log — call after every external API call.
-   * @param {string} provider   - e.g. 'amadeus', 'geoapify', 'ignav'
+   * @param {string} provider   - e.g. 'amadeus', 'google', 'ignav'
    * @param {string} operation  - e.g. 'searchHotels', 'geocode'
    * @param {object} result     - { isLive, count, latencyMs, message }
    */

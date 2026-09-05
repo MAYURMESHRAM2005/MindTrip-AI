@@ -1,14 +1,15 @@
 import ApiResponse from '../utils/ApiResponse.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import hotelProvider from '../providers/hotel.provider.js';
-import placesProvider from '../providers/places.provider.js';
+import placesProvider from '../providers/googlePlaces.provider.js';
 import { convert } from '../providers/currency.provider.js';
 import logger from '../utils/logger.js';
 
 /**
  * Search hotels: Amadeus offers first. When Amadeus is unconfigured we
- * fall back to Geoapify Places lodging results (live place data) clearly
- * labelled with its source - never invented inventory.
+ * fall back to Google Places lodging results (live place data) clearly
+ * labelled with its source - never invented inventory and never invented
+ * prices (Google Places has no room availability/booking prices).
  */
 export const searchHotels = asyncHandler(async (req, res) => {
   logger.entry('[CTRL:hotel]', 'searchHotels', req.query);
@@ -30,7 +31,9 @@ export const searchHotels = asyncHandler(async (req, res) => {
     return res.json(ApiResponse.ok(amadeus.message, { hotels: amadeus.data, provider: 'amadeus', isLive: true }));
   }
 
-  // Fallback: live Geoapify Places lodging data
+  // Fallback: live Google Places lodging data (location/rating only — Google
+  // Places never provides room availability or booking prices, so price stays
+  // null and the UI renders it as unavailable, never as a free hotel).
   const places = await placesProvider.textSearch({ query: `${city} hotels`, type: 'hotel', limit: 10 });
   if (places.isLive) {
     const hotels = places.data.map((p) => ({
@@ -39,15 +42,19 @@ export const searchHotels = asyncHandler(async (req, res) => {
       address: p.address,
       coordinates: p.coordinates,
       rating: p.rating,
+      userRatingCount: p.userRatingCount,
       priceLevel: p.priceLevel,
+      googleMapsUri: p.googleMapsUri,
       amenities: [],
       price: null,
-      provider: 'Geoapify Places',
+      provider: 'Google Places',
       bookingUrl: '',
       isLive: true,
-      dataSource: 'geoapify',
+      dataStatus: 'live',
+      priceStatus: 'unavailable',
+      dataSource: 'google-places',
     }));
-    return res.json(ApiResponse.ok('Live hotel listings from Geoapify Places (Amadeus unavailable)', { hotels, provider: 'geoapify', isLive: true, note: amadeus.message }));
+    return res.json(ApiResponse.ok('Live hotel listings from Google Places (Amadeus unavailable — room prices unavailable)', { hotels, provider: 'google', isLive: true, note: amadeus.message }));
   }
 
   logger.exit('[CTRL:hotel]', 'searchHotels', { status: 'degraded', provider: 'none', latencyMs: Date.now() - started });

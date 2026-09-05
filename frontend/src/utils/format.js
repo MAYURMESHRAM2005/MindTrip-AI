@@ -32,6 +32,21 @@ export function formatDateShort(date) {
   return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
+/**
+ * Format a date for the day header as "01 Sep 2026".
+ * @param {string|Date} date
+ * @returns {string}
+ */
+export function formatDateHeader(date) {
+  if (!date) return '';
+  const d = new Date(date);
+  if (isNaN(d)) return '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = d.toLocaleDateString('en-IN', { month: 'short' });
+  const year = d.getFullYear();
+  return `${day} ${month} ${year}`;
+}
+
 export function formatTime(time) {
   if (!time) return '';
   return time;

@@ -33,8 +33,8 @@ TravelMind AI is a multi-agent trip planning platform that generates personalize
                               │
 ┌─────────────────────────────▼───────────────────────────────────┐
 │                     PROVIDERS (External APIs)                   │
-│  Geoapify Places │ Viator │ Zomato │ Ticketmaster │ Amadeus    │
-│  OpenWeather │ AviationStack │ Geoapify Maps │ IGNAV │ Pay2All │
+│  Google Places │ Viator │ Zomato │ Ticketmaster │ Amadeus    │
+│  OpenWeather │ AviationStack │ Google Maps │ IGNAV │ Pay2All │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,13 +62,13 @@ TravelMind AI is a multi-agent trip planning platform that generates personalize
 ### 2.2 Data Collection (Parallel)
 | Provider | Data | Source | Status |
 |----------|------|--------|--------|
-| Geoapify Places | Attractions, restaurants, nightlife | Real API | ✅ Live |
+| Google Places | Attractions, restaurants, nightlife | Real API | ✅ Live |
 | Viator | Entry fees, tour prices | Real API | ✅ Live (new) |
 | Zomato | Restaurant ratings, avg costs | Real API | ✅ Live (new) |
 | Ticketmaster | Cultural events during trip | Real API | ✅ Live (new) |
 | Amadeus | Hotel offers + pricing | Real API | ✅ Live |
 | OpenWeather | 7-day forecast | Real API | ✅ Live |
-| Geoapify Maps | Driving routes between places | Real API | ✅ Live |
+| Google Routes API | Driving routes between places | Real API | ✅ Live |
 | Transport Intel | Flight/train/bus options | Real API | ✅ Live |
 | Local Guide | Cultural tips per region | Deterministic | ✅ Static |
 | Safety | Safety tips per region | Deterministic | ✅ Static |
@@ -141,7 +141,7 @@ TravelMind AI is a multi-agent trip planning platform that generates personalize
 **Impact:** Users may arrive at closed restaurants/attractions.
 
 **Recommendation:**
-- Use Geoapify `opening_hours` data (already fetched for top 30 attractions)
+- Use Google Places opening-hours data (already fetched for top 30 attractions)
 - Add day-of-week validation in the itinerary builder
 - For restaurants, add Zomato `is_open_now` equivalent (if API supports it)
 
@@ -269,13 +269,13 @@ TravelMind AI is a multi-agent trip planning platform that generates personalize
 
 | Category | Provider | Data Quality | Coverage | Cost | Status |
 |----------|----------|-------------|----------|------|--------|
-| **Places** | Geoapify | Good | Global | Free tier | ✅ |
+| **Places** | Google Places API | Excellent | Global | Metered | ✅ |
 | **Attraction Pricing** | Viator | Excellent | 2,500+ destinations | Affiliate | ✅ NEW |
 | **Restaurant Pricing** | Zomato | Good | 10K+ cities | Free tier | ✅ NEW |
 | **Events** | Ticketmaster | Good | Global | Free tier | ✅ NEW |
 | **Hotels** | Amadeus | Excellent | Global | Paid | ✅ |
 | **Weather** | OpenWeather | Good | Global | Free tier | ✅ |
-| **Maps/Routes** | Geoapify | Good | Global | Free tier | ✅ |
+| **Maps/Routes** | Google Routes API | Excellent | Global | Metered | ✅ |
 | **Flights** | AviationStack | Good | Global | Free tier | ✅ |
 | **Trains** | RapidAPI | Moderate | India-focused | Free tier | ⚠️ |
 | **Buses** | Pay2All | Moderate | India | Free tier | ⚠️ |
@@ -291,7 +291,7 @@ TravelMind AI is a multi-agent trip planning platform that generates personalize
 | **Travel Insurance** | Trip protection | Allianz/AIG API | Low |
 | **Local Transit** | Public transport schedules | Google Transit API | Medium |
 | **Parking** | Road trip convenience | ParkWhisp / SpotHero | Low |
-| **Pharmacies/Hospitals** | Emergency info | Already in Geoapify nearby | ✅ |
+| **Pharmacies/Hospitals** | Emergency info | Already in Google nearby | ✅ |
 
 ---
 
@@ -301,21 +301,21 @@ TravelMind AI is a multi-agent trip planning platform that generates personalize
 
 | Field | Source | Accuracy | Confidence |
 |-------|--------|----------|------------|
-| Attraction names | Geoapify | High | 95% |
-| Attraction coordinates | Geoapify | High | 98% |
+| Attraction names | Google | High | 95% |
+| Attraction coordinates | Google | High | 98% |
 | Attraction entry fees | Viator | High | 90% |
-| Restaurant names | Geoapify | High | 95% |
+| Restaurant names | Google | High | 95% |
 | Restaurant avg costs | Zomato | High | 85% |
 | Restaurant ratings | Zomato | High | 90% |
 | Hotel prices | Amadeus | High | 95% |
 | Hotel ratings | Amadeus | High | 90% |
 | Flight prices | Transport Intel | High | 90% |
 | Weather forecast | OpenWeather | High | 85% |
-| Opening hours | Geoapify Details | High | 80% |
+| Opening hours | Google Places Details | High | 80% |
 | Cultural events | Ticketmaster | High | 85% |
 | Travel tips | Deterministic | Medium | 70% |
 | Safety tips | Deterministic | Medium | 70% |
-| Local transport times | Geoapify Routes | High | 80% |
+| Local transport times | Google Routes | High | 80% |
 | Walking distances | Haversine | Low | 50% |
 
 ### 5.2 Known Data Gaps
@@ -337,7 +337,7 @@ TravelMind AI is a multi-agent trip planning platform that generates personalize
 | Component | Issue | Impact |
 |-----------|-------|--------|
 | Gemini API call | Single request for full itinerary | Slow (5-10s) |
-| Geoapify batch details | Sequential batches of 5 | Slow for 30 attractions |
+| Google batch details | Sequential batches of 5 | Slow for 30 attractions |
 | MongoDB writes | Synchronous writes for trip + itinerary | Blocking |
 | No connection pooling | Each provider creates new connections | Latency overhead |
 | No request queuing | All requests processed immediately | No rate limiting |

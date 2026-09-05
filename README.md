@@ -17,10 +17,11 @@ root/
 ## ⚡ Highlights
 
 - **Real authentication** — JWT access tokens (memory) + rotating refresh tokens (httpOnly cookies), bcrypt password hashing, email verification, forgot/reset password, Google sign-in via Firebase Authentication, RBAC (`user` / `admin`).
-- **Multi-Agent LLM architecture** — Orchestrator, User Preference, Destination, Budget, Flight, Train, Bus, Hotel, Restaurant, Attraction, Weather, Traffic, Local Guide, Safety, Expense, Translation, Final Validator. External-data agents fetch **real data first** (AviationStack, Amadeus, Geoapify Places, OpenWeatherMap) and Gemini only *reasons* over it.
-- **Deterministic Budget Optimizer** — allocation and optimization are plain arithmetic (tested), not LLM guesswork. Drops low-priority items and reduces flexible costs when over budget, showing original vs optimized vs saved.
-- **Final Validator Agent** — verifies budget ≤ limit, date consistency, time overlaps, hotel/transport/restaurant fit, and that estimates/live data are correctly labelled.
-- **Everything else** — interactive Leaflet maps with traffic-aware routes, hotels, flights, trains, buses, restaurants, weather, contextual chatbot that really edits your trip, voice assistant, image search, expense tracker with charts, PWA offline itinerary, emergency center, QR ticket wallet, PDF itinerary, multi-language (en/hi/mr), and a full admin dashboard.
+- **Multi-Agent LLM architecture** — Orchestrator, User Preference, Destination, Budget, Flight, Train, Bus, Hotel, Restaurant, Attraction, Weather, Traffic, Local Guide, Safety, Expense, Translation, Final Validator. External-data agents fetch **real data first** (AviationStack, Amadeus, Google Places, OpenWeatherMap) and Gemini only *reasons* over it.
+- **Google Maps Platform** — Geocoding, Places, Routes and the interactive Maps JavaScript map replace the previous third-party maps/places integration. Real places, real routes, real distances — never invented. Map tiles/UI are rendered with a referrer-restricted **browser** key while geocoding/places/routes run server-side with a separate restricted key.
+- **Deterministic Budget Optimizer** — allocation and optimization are plain arithmetic (tested), not LLM guesswork. Drops low-priority items and reduces flexible costs when over budget, showing original vs optimized vs saved. Missing prices are `null`/`unavailable` — never ₹0.
+- **Final Validator Agent** — verifies budget ≤ limit, date consistency, time overlaps, hotel/transport/restaurant fit, geographic correctness (destination lock), day-wise place uniqueness, and that estimates/live data are correctly labelled.
+- **Everything else** — interactive Google Maps with markers + routes, hotels, flights, trains, buses, restaurants, weather, contextual chatbot that really edits your trip, voice assistant, image search, expense tracker with charts, PWA offline itinerary, emergency center, QR ticket wallet, PDF itinerary, multi-language (en/hi/mr), and a full admin dashboard.
 
 ---
 
@@ -39,7 +40,7 @@ User Request
 │  EXTERNAL-DATA AGENTS (real providers FIRST)             │
 │  Flight → AviationStack Hotel → Amadeus                 │
 │  Train/Bus → configured API   Weather → OpenWeatherMap   │
-│  Restaurant/Attraction → Geoapify Places   Traffic → Geoapify │
+│  Restaurant/Attraction → Google Places  Traffic → Google Routes │
 ├─────────────────────────────────────────────────────────┤
 │ Budget Agent (deterministic math + AI reasoning)         │
 │ Itinerary Builder (deterministic day-by-day schedule)    │
@@ -64,11 +65,12 @@ Validated Trip + Itinerary (persisted in MongoDB)
 
 | Layer | Tech |
 | --- | --- |
-| Frontend | React 18, Vite 5, Tailwind CSS 3, React Router 6, TanStack React Query, Zustand, Axios, Framer Motion, Recharts, Lucide, React Hook Form + Zod, Leaflet, qrcode.react, Vitest |
+| Frontend | React 18, Vite 5, Tailwind CSS 3, React Router 6, TanStack React Query, Zustand, Axios, Framer Motion, Recharts, Lucide, React Hook Form + Zod, qrcode.react, Vitest |
 | Backend | Node 18+, Express, Mongoose, JWT, bcryptjs, cookie-parser, helmet, cors, express-rate-limit, compression, morgan, Joi, multer, nodemailer, pdfkit, @google/generative-ai, node:test + supertest |
 | Database | MongoDB (local or Atlas) |
 | AI | Google Gemini **3.5 Flash** (`gemini-3.5-flash` default, configurable via `GEMINI_MODEL`) |
-| APIs | AviationStack (flights), Amadeus (hotels), Geoapify (geocoding, routing, places), OpenWeatherMap, open.er-api.com (FX), configurable train/bus endpoints |
+| Maps | Google Maps Platform — Geocoding API, Places API (New), Routes API (server-side key) + Maps JavaScript API (referrer-restricted browser key) |
+| APIs | AviationStack (flights), Amadeus (hotels), OpenWeatherMap, open.er-api.com (FX), configurable train/bus endpoints |
 
 ---
 
@@ -78,7 +80,7 @@ Validated Trip + Itinerary (persisted in MongoDB)
 - MongoDB (local `mongod` or Atlas cluster) — *or* let the integration tests spin up `mongodb-memory-server`
 - Optional API keys (the app degrades gracefully without them):
   - **Google AI Studio** → `GEMINI_API_KEY` (required for AI features)
-  - **Geoapify** → `GEOAPIFY_API_KEY` (backend only — the frontend never holds keys)
+  - **Google Maps Platform** → `GOOGLE_MAPS_API_KEY` (backend — Geocoding, Places, Routes) + `VITE_GOOGLE_MAPS_BROWSER_KEY` (frontend Maps JavaScript API — referrer-restricted)
   - **OpenWeatherMap** → `OPENWEATHER_API_KEY`
   - **AviationStack** → `AVIATIONSTACK_API_KEY` (flights)  •  **Amadeus for Developers** → `AMADEUS_CLIENT_ID/SECRET` (hotels)
 
@@ -125,7 +127,8 @@ npm start                # runs the backend (serve frontend/dist with any static
 | `MONGODB_URI` | MongoDB connection string |
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Signing secrets (min 32 chars) |
 | `GEMINI_API_KEY` | Google Gemini API key |
-| `GEOAPIFY_API_KEY` | Geocoding, Routing, Places (server-side agents & endpoints) |
+| `GOOGLE_MAPS_API_KEY` | Google Maps Platform server key — Geocoding API, Places API, Routes API (server-side agents & endpoints). Never put in frontend code |
+| `VITE_GOOGLE_MAPS_BROWSER_KEY` | Maps JavaScript API key for the interactive map — HTTP-referrer restricted, browser-only (see `frontend/.env.example`) |
 | `OPENWEATHER_API_KEY` | Weather (server-side proxy) |
 | `AVIATIONSTACK_API_KEY` | Flights (free tier at aviationstack.com) |
 | `AMADEUS_CLIENT_ID` / `AMADEUS_CLIENT_SECRET` | Hotels |
@@ -136,7 +139,26 @@ npm start                # runs the backend (serve frontend/dist with any static
 | `FIREBASE_PROJECT_ID` / `FIREBASE_SERVICE_ACCOUNT` | Google sign-in (Firebase Auth) — see Provider Setup below |
 | `FRONTEND_URL` | CORS whitelist + email links |
 
-**Never commit `.env`.** All API keys live **only in `backend/.env`** (`GEOAPIFY_API_KEY`, `OPENWEATHER_API_KEY`, `AVIATIONSTACK_API_KEY`, `AMADEUS_*`, etc.). The frontend never holds keys and never calls external APIs directly — every request goes through the backend, which proxies Geoapify, OpenWeatherMap and future providers via `/api/geocode`, `/api/routes`, `/api/maps`, `/api/weather`, `/api/restaurants`, `/api/hotels`.
+**Never commit `.env`.** All server keys live **only in `backend/.env`** (`GOOGLE_MAPS_API_KEY`, `OPENWEATHER_API_KEY`, `AVIATIONSTACK_API_KEY`, `AMADEUS_*`, etc.). The frontend never holds server keys and never calls the Google Maps server APIs directly — geocoding, places and routes go through the backend (`/api/geocode`, `/api/routes`, `/api/maps`, `/api/places`, …). The only browser-side Google key is the referrer-restricted Maps JavaScript API key used to render the interactive map.
+
+### Google Maps Platform setup (backend + browser keys)
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/), create/select a project and **enable billing**.
+2. Enable these APIs for the project: **Geocoding API**, **Places API (New)**, **Routes API**, and **Maps JavaScript API**.
+3. Create **two API keys** (APIs & Services → Credentials → Create credentials → API key):
+   - **Server key** → `GOOGLE_MAPS_API_KEY` in `backend/.env`.
+     - *Restrictions → API restrictions*: enable only Geocoding API, Places API, Routes API. Restrict to your server IPs when possible. Never ship it to the browser.
+   - **Browser key** → `VITE_GOOGLE_MAPS_BROWSER_KEY` in `frontend/.env`.
+     - *Restrictions → Application restrictions*: **HTTP referrers** (e.g. `http://localhost:5173/*`). *API restrictions*: enable only the **Maps JavaScript API**.
+4. Restart the backend and frontend (`npm run dev:backend`, `npm run dev:frontend`).
+
+What each key/API powers:
+- **Geocoding API** (server): destination normalization, city → coordinates, reverse geocoding, destination-lock geographic validation.
+- **Places API (New)** (server): real restaurants, hotels (location/rating only — room prices are never fabricated), tourist attractions, nearby hospitals/police/ATMs, place details & opening hours.
+- **Routes API** (server): walking/driving/bicycling/transit distances, durations and polylines used in the itinerary and traffic estimates.
+- **Maps JavaScript API** (browser, referrer-restricted key): the interactive map — markers, place popups with Google Maps links, and route lines.
+
+> Without Google keys the app still works degraded: features show an honest **"Live data unavailable"** notice and the map panel explains that the browser key is missing — no feature fabricates data as a fallback.
 
 ---
 
@@ -157,7 +179,7 @@ Models: `User`, `RefreshToken`, `UserPreference`, `Trip`, `Itinerary`, `Itinerar
 | Provider | Where | Docs |
 | --- | --- | --- |
 | Gemini | [Google AI Studio](https://aistudio.google.com/app/apikey) | [Generative AI docs](https://ai.google.dev/gemini-api/docs) |
-| Geoapify | [myprojects.geoapify.com](https://myprojects.geoapify.com) → create a key; use a referrer-restricted browser key for the frontend | [Geoapify docs](https://apidocs.geoapify.com) |
+| Google Maps Platform | [Google Cloud Console](https://console.cloud.google.com/) → enable Geocoding, Places (New), Routes and Maps JavaScript APIs → create a server key (`GOOGLE_MAPS_API_KEY`) + a referrer-restricted browser key (`VITE_GOOGLE_MAPS_BROWSER_KEY`) | [Google Maps Platform docs](https://developers.google.com/maps/documentation) |
 | OpenWeatherMap | [openweathermap.org](https://home.openweathermap.org/api_keys) | [Weather API](https://openweathermap.org/api) |
 | AviationStack | [aviationstack.com](https://aviationstack.com) — free tier (real-time + airport lookup; schedules on paid plan) | [Flight API docs](https://aviationstack.com/documentation) |
 | Amadeus | [Amadeus for Developers](https://developers.amadeus.com) — free test credentials (hotels) | [Hotel Offers](https://developers.amadeus.com/self-service/category/hotels) |
@@ -192,7 +214,7 @@ backend/src/
 ├── services/      auth, gemini, budget (deterministic), itinerary, chat, pdf, email, translate…
 ├── agents/        17 agent modules (provider-first, AI-second)
 ├── orchestrator/  tripOrchestrator.js — the pipeline
-├── providers/     flight, train, bus, hotel, places, weather, maps, currency (abstraction layer)
+├── providers/     flight, train, bus, hotel, google-places, google-routes, google-geocoding, weather, currency (abstraction layer)
 ├── models/        Mongoose models
 ├── middleware/    auth, RBAC, rate limit, validation, error handling, upload
 ├── validators/    Joi schemas
