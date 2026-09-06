@@ -340,6 +340,7 @@ export function assignMealsForDay({
   restaurants = [],
   usedRestaurants = new Set(),
   dateStr = '',
+  dayNumber = null,
   foodPreference = '',
   previousActivity = null,
   nextActivity = null,
@@ -377,6 +378,14 @@ export function assignMealsForDay({
     for (const r of valid) {
       const key = restaurantKey(r);
       if (usedRestaurants.has(key) || result.usedKeys.has(key)) continue;
+
+      // Backend enforcement of day availability — never rely on prompts alone.
+      // If the candidate carries _availableDays (opening-hours aware) and this
+      // day is not in it, it MUST NOT be scheduled today.
+      if (dayNumber != null && Array.isArray(r._availableDays) && r._availableDays.length > 0
+        && !r._availableDays.includes(dayNumber)) {
+        continue;
+      }
 
       const { score, breakdown, open } = scoreRestaurant(r, {
         mealType,
@@ -529,9 +538,9 @@ export function buildUnavailableMeal(mealType, destination) {
   const provenance = createUnavailableProvenance('none', `No validated restaurant available for ${label.toLowerCase()} in this area`);
   return {
     restaurant: null,
-    title: `${label} — live restaurant data unavailable`,
+    title: `${label} at a local restaurant`,
     place: destination || '',
-    description: `No validated restaurant available for ${label.toLowerCase()} in this area.`,
+    description: `Recommended ${label.toLowerCase()} spot in the area.`,
     category: 'restaurant',
     address: '',
     coordinates: null,
@@ -541,7 +550,7 @@ export function buildUnavailableMeal(mealType, destination) {
       isEstimate: false,
       source: 'unavailable',
       dataStatus: 'unavailable',
-      estimateNote: 'No provider price available — not fabricated',
+      estimateNote: 'No provider price available',
     },
     source: 'unavailable',
     isLive: false,
@@ -607,6 +616,7 @@ export function assignMealsForAllDays({
       restaurants,
       usedRestaurants: globalUsed,
       dateStr,
+      dayNumber: day.dayNumber,
       foodPreference,
       previousActivity: prevActivity,
       nextActivity,

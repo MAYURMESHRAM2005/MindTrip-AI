@@ -94,20 +94,36 @@ function PlaceCard({ item, variant, currency }) {
 
         {showPrice && (
           <div className="mt-auto pt-1">
-            <p className="text-sm font-extrabold text-slate-900 dark:text-white">
-              {variant === 'hotel' ? (
-                <>{formatCurrency(item.pricePerNight, currency)} <span className="text-xs font-medium text-slate-400">{t('/night')}</span></>
-              ) : variant === 'restaurant' ? (
-                <>{formatCurrency(item.averageCost, currency)} <span className="text-xs font-medium text-slate-400">{t('avg meal')}</span></>
+            {variant === 'hotel' ? (
+              item.pricePerNight != null ? (
+                <p className="text-sm font-extrabold text-slate-900 dark:text-white">
+                  {formatCurrency(item.pricePerNight, currency)} <span className="text-xs font-medium text-slate-400">{t('/night')}</span>
+                </p>
               ) : (
-                <>{formatCurrency(item.entryFee.amount, currency)} <span className="text-xs font-medium text-slate-400">{t('entry')}</span></>
-              )}
-            </p>
-            {/* Estimate indicator for restaurant/attraction costs */}
-            {variant === 'restaurant' && item.averageCostIsEstimate && (
+                <p className="text-sm font-bold text-slate-400">{t('Price unavailable')}</p>
+              )
+            ) : variant === 'restaurant' ? (
+              item.averageCost != null ? (
+                <p className="text-sm font-extrabold text-slate-900 dark:text-white">
+                  {formatCurrency(item.averageCost, currency)} <span className="text-xs font-medium text-slate-400">{t('avg meal')}</span>
+                </p>
+              ) : (
+                <p className="text-sm font-bold text-slate-400">{t('Price unavailable')}</p>
+              )
+            ) : (
+              item.entryFee && item.entryFee.amount != null ? (
+                <p className="text-sm font-extrabold text-slate-900 dark:text-white">
+                  {formatCurrency(item.entryFee.amount, currency)} <span className="text-xs font-medium text-slate-400">{t('entry')}</span>
+                </p>
+              ) : (
+                <p className="text-sm font-bold text-slate-400">{t('Price unavailable')}</p>
+              )
+            )}
+            {/* Estimate indicator for restaurant/attraction costs (only when a price exists) */}
+            {variant === 'restaurant' && item.averageCost != null && item.averageCostIsEstimate && (
               <p className="mt-0.5 text-[10px] text-amber-500">≈ {t('estimate')} · {item.averageCostNote || t('Actual prices not available')}</p>
             )}
-            {variant === 'attraction' && item.entryFeeIsEstimate && (
+            {variant === 'attraction' && item.entryFee?.amount != null && item.entryFeeIsEstimate && (
               <p className="mt-0.5 text-[10px] text-amber-500">≈ {t('estimate')} · {item.entryFeeNote || t('Confirm entry fee locally')}</p>
             )}
             {/* Live badge for hotels */}

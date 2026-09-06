@@ -6,6 +6,8 @@ import {
   RefreshCw, Database, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { DataStatusBadge } from './ui/Badge';
+import PriceBadge from './ui/PriceBadge';
+import DistanceBadge from './ui/DistanceBadge';
 import { formatCurrency, formatDateShort, formatDateHeader } from '../utils/format';
 import { useI18n } from '../utils/i18n';
 import { logItineraryWarnings } from '../utils/itineraryValidator';
@@ -146,12 +148,12 @@ function ActivityRow({ activity, currency }) {
               </span>
             )}
             {(activity.travel?.distanceKm > 0 || activity.travel?.durationMin > 0) && (
-              <span className="inline-flex items-center gap-1">
-                <Navigation className="h-3 w-3" />
-                {activity.travel.distanceKm > 0 && `${activity.travel.distanceKm} km · `}
-                {activity.travel.durationMin} min {activity.travel.method}
-                {activity.travel.isEstimate && ` (${t('est.')})`}
-              </span>
+              <DistanceBadge
+                distanceKm={activity.travel?.distanceKm}
+                durationMin={activity.travel?.durationMin}
+                travelMode={activity.travel?.method}
+                isEstimate={activity.travel?.isEstimate}
+              />
             )}
             {activity.bookingUrl && (
               <a href={activity.bookingUrl} target="_blank" rel="noreferrer" className="font-semibold text-brand-600 hover:underline dark:text-brand-400">
@@ -162,25 +164,14 @@ function ActivityRow({ activity, currency }) {
         )}
       </div>
       <div className="shrink-0 text-right">
-        {activity.cost?.amount != null ? (
-          <p className="text-sm font-extrabold text-slate-900 dark:text-white">
-            {formatCurrency(activity.cost.amount, currency)}
-          </p>
-        ) : (
-          <p className="text-sm font-bold text-slate-400 dark:text-slate-600">
-            —
-          </p>
-        )}
-        {isPriceUnavailable && (
-          <p className="text-[10px] font-medium uppercase tracking-wide text-rose-500">{t('unavailable')}</p>
-        )}
-        {isPriceEstimate && activity.cost?.amount > 0 && (
-          <p className="text-[10px] font-medium uppercase tracking-wide text-amber-500">≈ {t('estimate')}</p>
-        )}
-        {isPriceLive && activity.cost?.amount > 0 && (
-          <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-500">● {t('live')}</p>
-        )}
-        {activity.cost?.perPerson > 0 && (
+        <PriceBadge
+          amount={activity.cost?.amount}
+          priceType={activity.priceType || costStatus}
+          currency={currency}
+          showLabel={true}
+          size="sm"
+        />
+        {activity.cost?.perPerson > 0 && activity.cost?.amount !== activity.cost?.perPerson && (
           <p className="text-[10px] text-slate-400">≈ {formatCurrency(activity.cost.perPerson, currency)}{t('/person')}</p>
         )}
       </div>
@@ -234,7 +225,10 @@ function DayCostBreakdown({ breakdown, currency }) {
         <div>
           <p className="text-[10px] font-semibold uppercase text-slate-400">{t('Remaining budget')}</p>
           <p className={`text-sm font-extrabold ${breakdown.remainingBudget >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-            {formatCurrency(breakdown.remainingBudget, currency)}
+            {breakdown.remainingBudget >= 0
+              ? formatCurrency(breakdown.remainingBudget, currency)
+              : `${t('Over budget by')} ${formatCurrency(Math.abs(breakdown.remainingBudget), currency)}`
+            }
           </p>
         </div>
       </div>
@@ -374,14 +368,12 @@ export default function ItineraryTimeline({ days = [], currency = 'INR' }) {
               </span>
               {day.overnight.area && <span className="text-slate-500 dark:text-slate-400">· {day.overnight.area}</span>}
               {/* Hotel data status */}
-              {day.overnight.dataStatus === 'unavailable' || (!day.overnight.pricePerRoomNight && !day.overnight.name) ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 font-semibold text-rose-700 dark:bg-rose-950 dark:text-rose-300">
-                  🔴 {t('Live data unavailable')}
-                </span>
-              ) : day.overnight.isLive ? (
+              {day.overnight.isLive ? (
                 <span className="rounded-full bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">● {t('live')}</span>
-              ) : (
+              ) : day.overnight.name ? (
                 <span className="rounded-full bg-amber-100 px-2 py-0.5 font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300">≈ {t('estimated')}</span>
+              ) : (
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">● {t('planned')}</span>
               )}
               {/* Provider info */}
               {day.overnight.provider && (
@@ -395,7 +387,7 @@ export default function ItineraryTimeline({ days = [], currency = 'INR' }) {
                 </span>
               )}
               {day.overnight.pricePerRoomNight == null && day.overnight.name && (
-                <span className="text-rose-500 dark:text-rose-400">· {t('Price unavailable')}</span>
+                <span className="text-slate-400 dark:text-slate-500">· {t('Book separately')}</span>
               )}
             </div>
           )}

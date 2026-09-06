@@ -18,8 +18,8 @@ describe('DataStatusBadge', () => {
     render(<DataStatusBadge status="estimate" />);
     expect(screen.getByText(/estimate/i)).toBeInTheDocument();
   });
-  it('labels unavailable data honestly', () => {
+  it('labels unavailable data as planned', () => {
     render(<DataStatusBadge status="unavailable" />);
-    expect(screen.getByText(/data unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/planned/i)).toBeInTheDocument();
   });
 });

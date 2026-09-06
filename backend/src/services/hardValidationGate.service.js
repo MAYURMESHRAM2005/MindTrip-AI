@@ -138,7 +138,7 @@ export function runHardValidation({
       validateProviderOwnership(act, dayNum, candidateMap, errors);
 
       // ─── RULE 5: Destination correctness ───
-      validateDestination(act, dayNum, destination, candidateMap, errors);
+      validateDestination(act, dayNum, destination, candidateMap, errors, warnings);
 
       // ─── RULE 6: Country correctness ───
       validateCountry(act, dayNum, country, candidateMap, errors);
@@ -183,7 +183,7 @@ export function runHardValidation({
       validateNoHallucination(act, dayNum, candidateMap, errors);
 
       // ─── RULE 20: Fabricated coordinates ───
-      validateCoordinates(act, dayNum, candidateMap, errors);
+      validateCoordinates(act, dayNum, candidateMap, errors, warnings);
     }
 
     // ─── RULE 21: Day/date consistency ───
@@ -314,7 +314,7 @@ function validateProviderOwnership(act, dayNum, candidateMap, errors) {
 }
 
 // ─── RULE 5: Destination correctness ───
-function validateDestination(act, dayNum, destination, candidateMap, errors) {
+function validateDestination(act, dayNum, destination, candidateMap, errors, warnings) {
   if (!destination) return;
   if (!act.address && !act.suburb) return;
 
@@ -551,7 +551,7 @@ function validateNoHallucination(act, dayNum, candidateMap, errors) {
 }
 
 // ─── RULE 20: Fabricated coordinates ───
-function validateCoordinates(act, dayNum, candidateMap, errors) {
+function validateCoordinates(act, dayNum, candidateMap, errors, warnings) {
   const lat = act.coordinates?.lat ?? act.latitude;
   const lng = act.coordinates?.lng ?? act.longitude;
 

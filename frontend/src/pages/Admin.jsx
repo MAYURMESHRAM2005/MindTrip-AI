@@ -212,16 +212,24 @@ export default function Admin() {
               </tr>
             </thead>
             <tbody>
-              {(providersData?.providers || []).map((p) => (
-                <tr key={p.name} className="border-b border-slate-50 dark:border-slate-800/60">
-                  <td className="py-2.5 pr-4 font-bold text-slate-900 dark:text-white">{p.name}</td>
-                  <td className="py-2.5 pr-4"><Badge tone="slate">{p.kind}</Badge></td>
-                  <td className="py-2.5">
-                    <ProviderStatusBadge configured={p.configured} />
-                    {p.message && <span className="ml-2 text-xs text-slate-400">{p.message}</span>}
-                  </td>
-                </tr>
-              ))}
+              {(providersData?.providers || []).map((p) => {
+                // The Maps JavaScript API runs in the browser with its own
+                // referrer-restricted key that the backend cannot see. Its real
+                // configured status is checked here from the frontend env var.
+                const configured = p.frontendCheck
+                  ? Boolean(import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY)
+                  : p.configured;
+                return (
+                  <tr key={p.name} className="border-b border-slate-50 dark:border-slate-800/60">
+                    <td className="py-2.5 pr-4 font-bold text-slate-900 dark:text-white">{p.name}</td>
+                    <td className="py-2.5 pr-4"><Badge tone="slate">{p.kind}</Badge></td>
+                    <td className="py-2.5">
+                      <ProviderStatusBadge configured={configured} />
+                      {p.message && <span className="ml-2 text-xs text-slate-400">{p.message}</span>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

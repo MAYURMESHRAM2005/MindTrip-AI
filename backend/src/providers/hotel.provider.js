@@ -38,8 +38,31 @@ export async function searchHotels({ city, checkIn, checkOut, adults = 2, rooms 
     const token = await getToken();
     const host = env.AMADEUS_ENV === 'production' ? 'https://api.amadeus.com' : 'https://test.api.amadeus.com';
 
+    // 0. Resolve the destination into an Amadeus IATA city CODE. The by-city
+    // endpoint requires a code like BOM — sending a city name like "Mumbai"
+    // returns no hotels. Resolve names through the reference-data locations
+    // search instead of assuming the caller already passed a code.
+    let cityCode = String(city || '').trim().toUpperCase();
+    const CITY_CODE_RE = /^[A-Z]{3}$/;
+    if (!CITY_CODE_RE.test(cityCode)) {
+      const locUrl = `${host}/v1/reference-data/locations?subType=CITY&keyword=${encodeURIComponent(city)}`;
+      const locData = await axiosGet(locUrl, {}, { headers: { Authorization: `Bearer ${token}` } }, 10000);
+      const cityLower = String(city || '').trim().toLowerCase();
+      const matches = (locData.data || []).filter((l) => {
+        const name = String(l.name || '').toLowerCase();
+        return name.includes(cityLower) || cityLower.includes(name);
+      });
+      const chosen = matches[0] || (locData.data || [])[0];
+      cityCode = chosen?.iataCode || chosen?.cityCode || '';
+      if (!cityCode) {
+        logger.warn(`[PROVIDER:hotel] Could not resolve Amadeus city code for "${city}"`);
+        return unavailable('amadeus-hotels', `Live data unavailable: no Amadeus city code found for "${city}"`);
+      }
+      logger.info(`[PROVIDER:hotel] Resolved destination "${city}" → Amadeus city code ${cityCode}`);
+    }
+
     // 1. Hotel list by city keyword
-    const listUrl = `${host}/v1/reference-data/locations/hotels/by-city?cityCode=${encodeURIComponent(city)}`;
+    const listUrl = `${host}/v1/reference-data/locations/hotels/by-city?cityCode=${encodeURIComponent(cityCode)}`;
     const listData = await axiosGet(listUrl, {}, { headers: { Authorization: `Bearer ${token}` } }, 10000);
     const hotels = listData.data || [];
 

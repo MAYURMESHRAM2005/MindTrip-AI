@@ -270,6 +270,14 @@ function entryFeeEstimateFor(attraction) {
 }
 
 function attractionCost(a, currency, partySize) {
+  // ── Check if genuinely free (provider-confirmed) ──
+  // A provider-reported fee of exactly 0 with isEstimate=false is verified free.
+  const providerFree = Boolean(
+    a.entryFee && typeof a.entryFee.amount === 'number' && a.entryFee.amount === 0
+    && a.entryFee.isEstimate === false
+  );
+  const isFree = Boolean(a.isFree) || providerFree;
+
   // Use Viator real pricing when available (not an estimate)
   if (a.entryFee && typeof a.entryFee.amount === 'number' && a.entryFee.amount > 0) {
     const perPerson = a.entryFee.amount;
@@ -279,22 +287,55 @@ function attractionCost(a, currency, partySize) {
       perPerson,
       currency: cur,
       isEstimate: false,
-      estimateNote: `Real price from Viator (${a.entryFee.productTitle || a.entryFee.source}) × ${partySize} traveller(s)`,
-      source: 'viator',
+      isFree: false,
+      estimateNote: `Real price from ${a.entryFee.source || 'provider'} (${a.entryFee.productTitle || ''}) × ${partySize} traveller(s)`,
+      source: a.entryFee.source || 'viator',
       fetchedAt: a.entryFee.fetchedAt || NOW_ISO,
     };
   }
-  // No provider price available — do NOT invent a price
-  // Return null amount with honest unavailability
-  const fee = entryFeeEstimateFor(a);
+
+  // ── Genuinely free attraction (provider-confirmed) ──
+  if (isFree) {
+    return {
+      amount: 0,
+      perPerson: 0,
+      currency: currency || 'INR',
+      isEstimate: false,
+      isFree: true,
+      dataStatus: 'live',
+      estimateNote: 'Free entry — confirmed by provider',
+      source: a.entryFee?.source || 'provider',
+      fetchedAt: NOW_ISO,
+    };
+  }
+
+  // ── No provider price available — deterministic estimate ──
+  // Use a reasonable estimate based on attraction type rather than returning null.
+  const typeEstimates = {
+    museum: 200, monument: 150, fort: 200, palace: 300,
+    temple: 0, church: 0, mosque: 0, park: 0, garden: 0,
+    beach: 0, viewpoint: 0, waterfall: 50, lake: 0,
+  };
+  const types = (a.types || []).join(' ').toLowerCase();
+  let estimatedFee = 150; // Default estimate
+  for (const [type, est] of Object.entries(typeEstimates)) {
+    if (types.includes(type)) { estimatedFee = est; break; }
+  }
+  // Temples, churches, mosques, parks, beaches, viewpoints are commonly free
+  const likelyFree = /temple|church|mosque|park|garden|beach|viewpoint|waterfront/i.test(types);
+  if (likelyFree) estimatedFee = 0;
+
   return {
-    amount: fee.amount, // null — not fabricated
-    perPerson: null,
-    currency,
-    isEstimate: false,
-    dataStatus: 'unavailable',
-    estimateNote: fee.estimateNote,
-    source: 'unavailable',
+    amount: estimatedFee,
+    perPerson: estimatedFee,
+    currency: currency || 'INR',
+    isEstimate: true,
+    isFree: estimatedFee === 0,
+    dataStatus: 'estimate',
+    estimateNote: estimatedFee === 0
+      ? 'Likely free — public outdoor attraction'
+      : `Estimated entry fee based on attraction type (${estimatedFee} ${currency || 'INR'})`,
+    source: 'deterministic-estimate',
     fetchedAt: NOW_ISO,
   };
 }
@@ -317,7 +358,8 @@ function routeCacheKey(a, b) {
 
 function travelBetween(a, b) {
   if (!a?.coordinates || !b?.coordinates) {
-    return { distanceKm: 0, durationMin: 15, method: 'walking', isEstimate: true };
+    // No coordinates to route on — never fabricate a distance/duration.
+    return { distanceKm: null, durationMin: null, method: 'walking', isEstimate: true, dataStatus: 'unavailable' };
   }
 
   // Try real route from cache first
@@ -569,6 +611,9 @@ export function buildDaysPlan({
 
   const transportMode = transportResult?.mode || 'transport';
   const modeLabel = transportMode === 'flight' ? 'Flight' : transportMode === 'train' ? 'Train' : transportMode === 'bus' ? 'Bus' : 'Transport';
+  // The DB category enum only knows flight/train/bus/transport — a recommended
+  // road trip (self-drive / cab) must be stored as plain 'transport'.
+  const transportCategory = ['flight', 'train', 'bus'].includes(transportMode) ? transportMode : 'transport';
   const transportLive = transportResult?.data?.isLive === true;
   const selectedTransport = transportResult?.data?.selected || null;
   const transportAlloc = allocation.transport?.amount || 0;
@@ -624,6 +669,13 @@ export function buildDaysPlan({
     const area = areaForDay(idx);
     const areaCentroid = area.centroid;
 
+    // Backend enforcement of day availability: when a candidate carries
+    // _availableDays (opening-hours aware metadata from the day-aware pipeline)
+    // it may ONLY be scheduled on days listed there. This is enforced in code,
+    // never left to prompts.
+    const availableOnDay = (p) => !Array.isArray(p?._availableDays) || p._availableDays.length === 0
+      || p._availableDays.includes(dayNumber);
+
     // Day-specific pools: the day's own area first (keeps each day focused on
     // its geographic region), supplemented by nearby places only when the area
     // has too few real options, then the full list as a last resort.
@@ -632,40 +684,41 @@ export function buildDaysPlan({
     // (usedAttractions for attractions, usedRestaurants for restaurants, etc.).
     const near = (pool, maxKm, usedKeys) =>
       (pool || []).filter(
-        (p) => (!areaCentroid || p.coordinates?.lat == null
-          || haversineKm(areaCentroid.lat, areaCentroid.lng, p.coordinates.lat, p.coordinates.lng) <= maxKm)
+        (p) => availableOnDay(p)
+          && (!areaCentroid || p.coordinates?.lat == null
+            || haversineKm(areaCentroid.lat, areaCentroid.lng, p.coordinates.lat, p.coordinates.lng) <= maxKm)
           && !(usedKeys || usedAttractions).has(placeKey(p))
       );
     const areaGroup = Array.isArray(area.attractions) ? area.attractions : [];
     // Filter out already-used attractions from the area group
-    let dayAttractions = areaGroup.filter((x) => !usedAttractions.has(placeKey(x)));
+    let dayAttractions = areaGroup.filter((x) => availableOnDay(x) && !usedAttractions.has(placeKey(x)));
     if (dayAttractions.length < 2 && areaCentroid) {
       const nearby = near(attractionsPool, AREA_RADIUS_KM, usedAttractions).filter((x) => !dayAttractions.includes(x));
       dayAttractions = dayAttractions.concat(nearby);
     }
     if (!dayAttractions.length) {
       // Last resort: use the full pool but exclude already-used attractions
-      dayAttractions = attractionsPool.filter((x) => !usedAttractions.has(placeKey(x)));
+      dayAttractions = attractionsPool.filter((x) => availableOnDay(x) && !usedAttractions.has(placeKey(x)));
     }
     // Filter restaurants: prefer geo-zone pool, then nearby, then full pool
     // Exclude already-used restaurants to prevent cross-day repeats
     const geoZoneRestaurants = (geoZones[idx % Math.max(1, geoZones.length)]?.restaurantPool || [])
-      .filter((x) => !usedRestaurants.has(placeKey(x)));
+      .filter((x) => availableOnDay(x) && !usedRestaurants.has(placeKey(x)));
     const nearbyRestaurants = near(restaurantsPool, LOCAL_RADIUS_KM, usedRestaurants);
     const dayRestaurants = geoZoneRestaurants.length > 0
       ? geoZoneRestaurants
       : nearbyRestaurants.length > 0
         ? nearbyRestaurants
-        : restaurantsPool.filter((x) => !usedRestaurants.has(placeKey(x)));
+        : restaurantsPool.filter((x) => availableOnDay(x) && !usedRestaurants.has(placeKey(x)));
     // Filter nightlife: prefer geo-zone pool, then nearby, then full pool
     const geoZoneNightlife = (geoZones[idx % Math.max(1, geoZones.length)]?.nightlifePool || [])
-      .filter((x) => !usedNightlife.has(placeKey(x)));
+      .filter((x) => availableOnDay(x) && !usedNightlife.has(placeKey(x)));
     const nearbyNightlife = near(nightlifePool, LOCAL_RADIUS_KM, usedNightlife);
     const dayNightlife = geoZoneNightlife.length > 0
       ? geoZoneNightlife
       : nearbyNightlife.length > 0
         ? nearbyNightlife
-        : nightlifePool.filter((x) => !usedNightlife.has(placeKey(x)));
+        : nightlifePool.filter((x) => availableOnDay(x) && !usedNightlife.has(placeKey(x)));
 
     // --- meal assignment via deterministic engine -------------------
     const areaPickNote = areaRepeat && areas.length > 1 ? `Area repeated: ${destination} has fewer distinct live-data zones than trip days.` : '';
@@ -674,6 +727,7 @@ export function buildDaysPlan({
       restaurants: dayRestaurants,
       usedRestaurants,
       dateStr: typeof date === 'string' ? date : (date?.toISOString?.() || ''),
+      dayNumber,
       foodPreference: prefs?.foodPreference || '',
       previousActivity: dayAttractions[0] || null,
       nextActivity: dayAttractions[dayAttractions.length - 1] || null,
@@ -736,13 +790,46 @@ export function buildDaysPlan({
     // Every activity now includes a strict provenance block for data lineage.
     const placeActivity = ({ time, title, place, description, category, address, coordinates, cost, source, isLive, dataStatus, priority, slot, bookingUrl = '', travel, provider, providerId }) => {
       const resolvedDataStatus = dataStatus || (isLive ? 'live' : 'unavailable');
+      // Cost status must always mirror the activity status (never default to
+      // 'unavailable' in the DB for an item that actually has a live price).
+      const resolvedCost = { ...(cost || {}) };
+      if (resolvedCost.amount != null && resolvedCost.dataStatus == null) {
+        resolvedCost.dataStatus = resolvedDataStatus === 'estimate' ? 'estimate'
+          : resolvedDataStatus === 'unavailable' && resolvedCost.isEstimate ? 'estimate'
+            : resolvedDataStatus;
+        resolvedCost.isEstimate = resolvedCost.dataStatus === 'estimate';
+      } else if (resolvedCost.amount == null && resolvedCost.dataStatus == null) {
+        resolvedCost.dataStatus = 'unavailable';
+        resolvedCost.isEstimate = false;
+      }
       let provenance;
       if (resolvedDataStatus === 'live') {
         provenance = createProviderProvenance(provider || source || 'unknown', providerId || place || 'unknown', 'live');
-      } else if (resolvedDataStatus === 'estimated') {
+      } else if (resolvedDataStatus === 'estimated' || resolvedDataStatus === 'estimate') {
         provenance = createEstimatedProvenance(provider || source || 'system', providerId || 'estimated');
       } else {
         provenance = createUnavailableProvenance(provider || source || 'none', 'No reliable provider data available');
+      }
+
+      // ── priceType: authoritative 4-tier data hierarchy ──
+      // 'live'     = real API/provider price (real-time or recently fetched)
+      // 'cached'   = previously verified provider data, reused from cache
+      // 'estimate' = deterministic estimate from pricing rules (not real-time)
+      // 'free'     = confirmed free by provider (entry fee = 0, isFree = true)
+      let priceType = 'unknown';
+      if (resolvedCost.amount === 0 && resolvedCost.isFree === true) {
+        priceType = 'free';
+      } else if (resolvedCost.amount != null && resolvedCost.amount > 0) {
+        if (resolvedDataStatus === 'live' && resolvedCost.isEstimate !== true) {
+          priceType = 'live';
+        } else if (resolvedCost.isEstimate === true || resolvedDataStatus === 'estimate') {
+          priceType = 'estimate';
+        } else {
+          priceType = 'cached';
+        }
+      } else if (resolvedCost.amount == null) {
+        // No price data at all — unknown, not free
+        priceType = 'unknown';
       }
 
       return {
@@ -754,11 +841,13 @@ export function buildDaysPlan({
         category,
         address: address || '',
         coordinates: coordinates || null,
-        cost: { ...cost },
+        cost: resolvedCost,
         source: source || (isLive ? 'provider' : 'estimate'),
         bookingUrl,
         isLive: Boolean(isLive),
         dataStatus: resolvedDataStatus,
+        priceType,
+        isFree: resolvedCost.isFree === true,
         priority,
         travel,
         fetchedAt: NOW_ISO,
@@ -775,7 +864,7 @@ export function buildDaysPlan({
           title: `${modeLabel} to ${destination}`,
           place: t.airline ? `${t.airline} ${t.flightNumber || ''}`.trim() : t.trainName || t.operator || destination,
           description: `${origin || 'Origin'} → ${destination}. Provider: ${t.provider || 'live provider'}.`,
-          category: transportMode,
+          category: transportCategory,
           cost: { amount: outboundCost, currency, isEstimate: transportLive === false, estimateNote: transportLive ? 'Price from provider' : 'Estimated from transport budget' },
           source: 'provider', isLive: transportLive, dataStatus: transportLive ? 'live' : 'unavailable', priority: 1,
           travel: { distanceKm: 0, durationMin: t.durationMin || 0, method: transportMode, isEstimate: !transportLive },
@@ -808,23 +897,21 @@ export function buildDaysPlan({
           category: 'hotel',
           address: hotel.address || '',
           coordinates: hotel.latitude != null ? { lat: Number(hotel.latitude), lng: Number(hotel.longitude) } : null,
-          cost: { amount: 0, currency: hotel?.price?.currency || currency, isEstimate: true, estimateNote: 'Rate charged on the overnight entry' },
+          cost: { amount: null, currency: hotel?.price?.currency || currency, isEstimate: false, dataStatus: 'unavailable', estimateNote: 'No separate charge — the per-night rate appears on the overnight entry' },
           source: hotelPlan.isLive ? 'amadeus-hotels' : 'budget-estimate', isLive: hotelPlan.isLive,
           dataStatus: hotelPlan.isLive ? 'live' : 'estimate', priority: 1,
           provider: hotelPlan.isLive ? 'amadeus-hotels' : 'budget-estimate',
           providerId: hotel.hotelId || hotel.id || `hotel-${nextSeq()}`,
-        }));
-      } else {
+        }));      } else {
         activities.push(placeActivity({
           time: '12:00', slot: 'hotel',
-          title: 'Live hotel data unavailable',
+          title: `Accommodation in ${destination}`,
           place: destination,
-          description: `No real hotel offers found for ${destination}. Live hotel data unavailable — please book accommodation separately.`,
+          description: `No live hotel offers found — please book accommodation separately.`,
           category: 'hotel',
-          cost: { amount: 0, currency, isEstimate: false, dataStatus: 'unavailable', estimateNote: 'No provider hotel available' },
+          cost: { amount: null, currency, isEstimate: false, dataStatus: 'unavailable', estimateNote: 'No provider hotel available' },
           source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 1,
-          provider: 'none',
-          providerId: `hotel-unavailable-${nextSeq()}`,
+          provider: 'none', providerId: `hotel-unavailable-${nextSeq()}`,
         }));
       }
     }
@@ -884,18 +971,16 @@ export function buildDaysPlan({
           source: 'google', isLive: true, dataStatus: 'live', priority: 1,
           provider: 'google',
           providerId: pick.placeId || pick.id || `attraction-${nextSeq()}`,
-        }));
-      } else {
+        }));      } else {
         activities.push(placeActivity({
           time: '09:30', slot: 'morning',
-          title: 'Morning activity',
+          title: `Explore ${destination} — morning sightseeing`,
           place: destination,
-          description: 'No validated morning attraction available for this area. Live attraction data unavailable.',
-          category: 'attraction',
-          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'No live data available — generic budget estimate, no real price known' },
-          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 3,
-          provider: 'none',
-          providerId: `attraction-unavailable-${nextSeq()}`,
+          description: 'Free time to explore local attractions in the area.',
+          category: 'activity',
+          cost: { amount: 0, currency, isEstimate: false, dataStatus: 'estimate', estimateNote: 'Free exploration — no provider cost', isFree: true },
+          source: 'deterministic', isLive: false, dataStatus: 'estimate', priority: 3,
+          provider: 'deterministic', providerId: `morning-explore-${nextSeq()}`,
         }));
       }
 
@@ -951,18 +1036,16 @@ export function buildDaysPlan({
           source: 'google', isLive: true, dataStatus: 'live', priority: 1,
           provider: 'google',
           providerId: a.placeId || a.id || `attraction-${nextSeq()}`,
-        }));
-      } else {
+        }));      } else {
         activities.push(placeActivity({
           time: '14:30', slot: 'afternoon',
-          title: 'Afternoon activity',
+          title: `Explore ${destination} — afternoon sightseeing`,
           place: destination,
-          description: 'No validated afternoon attraction available for this area. Live attraction data unavailable.',
+          description: 'Free time to explore local attractions in the area.',
           category: 'activity',
-          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'No live data available — generic budget estimate, no real price known' },
-          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 3,
-          provider: 'none',
-          providerId: `activity-unavailable-${nextSeq()}`,
+          cost: { amount: 0, currency, isEstimate: false, dataStatus: 'estimate', estimateNote: 'Free exploration — no provider cost', isFree: true },
+          source: 'deterministic', isLive: false, dataStatus: 'estimate', priority: 3,
+          provider: 'deterministic', providerId: `afternoon-explore-${nextSeq()}`,
         }));
       }
 
@@ -979,18 +1062,16 @@ export function buildDaysPlan({
           source: 'google', isLive: true, dataStatus: 'live', priority: 2,
           provider: 'google',
           providerId: e.placeId || e.id || `activity-${nextSeq()}`,
-        }));
-      } else {
+        }));      } else {
         activities.push(placeActivity({
           time: '17:30', slot: 'evening',
-          title: 'Evening activity',
+          title: `Evening stroll in ${destination}`,
           place: destination,
-          description: 'No validated evening spot available for this area. Live evening data unavailable.',
+          description: 'Free time for an evening walk or local exploration.',
           category: 'activity',
-          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'No live data available — generic budget estimate, no real price known' },
-          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 3,
-          provider: 'none',
-          providerId: `activity-unavailable-${nextSeq()}`,
+          cost: { amount: 0, currency, isEstimate: false, dataStatus: 'estimate', estimateNote: 'Free exploration — no provider cost', isFree: true },
+          source: 'deterministic', isLive: false, dataStatus: 'estimate', priority: 3,
+          provider: 'deterministic', providerId: `evening-explore-${nextSeq()}`,
         }));
       }
 
@@ -1050,18 +1131,16 @@ export function buildDaysPlan({
           source: 'google', isLive: true, dataStatus: 'live', priority: 3,
           provider: 'google',
           providerId: n.placeId || n.id || `nightlife-${nextSeq()}`,
-        }));
-      } else {
+        }));      } else {
         activities.push(placeActivity({
           time: '21:30', slot: 'night',
-          title: 'Night activity',
+          title: `Evening relaxation in ${destination}`,
           place: destination,
-          description: 'No nightlife or evening attraction data available for this area.',
+          description: 'Wind down with a relaxed evening in the area.',
           category: 'activity',
-          cost: { amount: 0, currency, isEstimate: true, estimateNote: 'No live data available — generic budget estimate, no real price known' },
-          source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 3,
-          provider: 'none',
-          providerId: `nightlife-unavailable-${nextSeq()}`,
+          cost: { amount: 0, currency, isEstimate: false, dataStatus: 'estimate', estimateNote: 'Free activity — no provider cost', isFree: true },
+          source: 'deterministic', isLive: false, dataStatus: 'estimate', priority: 3,
+          provider: 'deterministic', providerId: `night-relax-${nextSeq()}`,
         }));
       }
 
@@ -1102,19 +1181,17 @@ export function buildDaysPlan({
           provider: hotelPlan.isLive ? 'amadeus-hotels' : 'budget-estimate',
           providerId: hotel.hotelId || hotel.id || `hotel-${nextSeq()}`,
         }));
-      } else {
-        activities.push(placeActivity({
+      } else {        activities.push(placeActivity({
           time: '22:30', slot: 'hotel',
-          title: 'Live hotel data unavailable',
+          title: `Overnight stay in ${destination}`,
           place: destination,
-          description: 'No real hotel offers found — overnight accommodation not included in this itinerary.',
+          description: 'No live hotel offers found — please book accommodation separately.',
           category: 'hotel',
           address: '',
           coordinates: null,
-          cost: { amount: 0, currency, isEstimate: false, dataStatus: 'unavailable', estimateNote: 'No provider hotel available' },
+          cost: { amount: null, currency, isEstimate: false, dataStatus: 'unavailable', estimateNote: 'No provider hotel available' },
           source: 'unavailable', isLive: false, dataStatus: 'unavailable', priority: 1,
-          provider: 'none',
-          providerId: `hotel-unavailable-${nextSeq()}`,
+          provider: 'none', providerId: `hotel-unavailable-${nextSeq()}`,
         }));
       }
     }
@@ -1129,7 +1206,7 @@ export function buildDaysPlan({
         category: 'hotel',
         address: hotel?.address || '',
         coordinates: hotel?.latitude != null ? { lat: Number(hotel.latitude), lng: Number(hotel.longitude) } : null,
-        cost: { amount: 0, currency, isEstimate: false, dataStatus: hotel?.name ? 'estimate' : 'unavailable', estimateNote: 'Administrative event - no charge' },
+        cost: { amount: null, currency, isEstimate: false, dataStatus: hotel?.name ? 'estimate' : 'unavailable', estimateNote: 'Administrative event — no charge' },
         source: hotel?.name ? 'budget-estimate' : 'unavailable', isLive: false, dataStatus: hotel?.name ? 'estimate' : 'unavailable', priority: 1,
         provider: hotel?.name ? 'budget-estimate' : 'none',
         providerId: hotel?.hotelId || hotel?.id || `hotel-checkout-${nextSeq()}`,
@@ -1140,6 +1217,7 @@ export function buildDaysPlan({
         if (returnRec) {
           const returnMode = returnRec.mode || 'transport';
           const returnModeLabel = returnMode === 'flight' ? 'Flight' : returnMode === 'train' ? 'Train' : returnMode === 'bus' ? 'Bus' : 'Transport';
+          const returnCategory = ['flight', 'train', 'bus'].includes(returnMode) ? returnMode : 'transport';
           const returnPrice = returnRec.mainTransport?.price?.amount || returnRec.totalCost || returnEstimate;
           const returnIsLive = returnRec.isLive === true;
           activities.push(placeActivity({
@@ -1149,7 +1227,7 @@ export function buildDaysPlan({
               ? `${returnRec.mainTransport.airline} ${returnRec.mainTransport.flightNumber || ''}`.trim()
               : returnRec.mainTransport?.trainName || returnRec.mainTransport?.operator || `${destination} → ${origin}`,
             description: `${destination} → ${origin}. Provider: ${returnRec.source || 'live provider'}.${returnRec.recommendation ? ` ${returnRec.recommendation}` : ''}`,
-            category: returnMode,
+            category: returnCategory,
             cost: { amount: returnPrice, currency, isEstimate: !returnIsLive, estimateNote: returnIsLive ? 'Price from provider' : 'Estimated from transport budget' },
             source: returnIsLive ? 'provider' : 'budget-estimate', isLive: returnIsLive, dataStatus: returnIsLive ? 'live' : 'unavailable', priority: 1,
             travel: { distanceKm: 0, durationMin: 0, method: returnMode, isEstimate: !returnIsLive },
@@ -1203,6 +1281,10 @@ export function buildDaysPlan({
     const dayCost = Math.round(activities.reduce((s, a) => s + (a.cost?.amount || 0), 0) * 100) / 100;
     cumulative = Math.round((cumulative + dayCost) * 100) / 100;
     const remainingBudget = totalBudget != null ? Math.round((totalBudget - cumulative) * 100) / 100 : null;
+    // Count items whose price is unknown (not live, not a labelled estimate) so
+    // the UI can show "N item(s) price unavailable" instead of implying the
+    // day total covers everything.
+    const unavailableItems = activities.filter((a) => a.cost?.amount == null && a.dataStatus !== 'live').length;
 
     // Overnight summary (real hotel when available, honest estimate otherwise).
     // A 1-day trip has zero nights - no overnight charge, just a day-use stay.
@@ -1213,7 +1295,7 @@ export function buildDaysPlan({
       rooms,
       nights: overnightNights,
       pricePerRoomNight: hotelNightly,
-      total: hotelNightly != null ? Math.round(hotelNightly * overnightNights * rooms * 100) / 100 : 0,
+      total: hotelNightly != null ? Math.round(hotelNightly * overnightNights * rooms * 100) / 100 : null,
       address: hotel?.address || '',
       rating: hotel?.rating ?? null,
       amenities: Array.isArray(hotel?.amenities) ? hotel.amenities : [],
@@ -1244,7 +1326,7 @@ export function buildDaysPlan({
             indoorPlan: badWeather,
           }
         : null,
-      costBreakdown: { ...breakdown, dayTotal: dayCost, perPerson: Math.round((dayCost / partySize) * 100) / 100, cumulative, remainingBudget },
+      costBreakdown: { ...breakdown, dayTotal: dayCost, perPerson: Math.round((dayCost / partySize) * 100) / 100, cumulative, remainingBudget, unavailableItems },
       dayCost,
       cumulativeCost: cumulative,
       remainingBudget,
@@ -1326,6 +1408,7 @@ export function finalizeDayCosts(days, { partySize, totalBudget } = {}) {
       perPerson: Math.round((dayCost / safeParty) * 100) / 100,
       cumulative,
       remainingBudget: totalBudget != null ? Math.round((totalBudget - cumulative) * 100) / 100 : null,
+      unavailableItems: (day.activities || []).filter((a) => a.cost?.amount == null && a.dataStatus !== 'live').length,
     };
     day.cumulativeCost = cumulative;
     day.remainingBudget = totalBudget != null ? Math.round((totalBudget - cumulative) * 100) / 100 : null;
@@ -1619,6 +1702,10 @@ export function buildItineraryExtras({
     remainingBudget: budgetUtil.remaining,
     budgetUsedPct: budgetUtil.usedPct,
     withinBudget: budgetUtil.withinBudget,
+    // How many itinerary items have no price at all (unknown — not ₹0).
+    unavailableItems: (Array.isArray(days) ? days : [])
+      .flatMap((d) => d.activities || [])
+      .filter((a) => a.cost?.amount == null && a.dataStatus !== 'live').length,
     optimized,
   };
 
@@ -1675,12 +1762,14 @@ export function buildItineraryExtras({
   for (const a of allActivities) {
     if ((a.category === 'attraction' || a.category === 'activity') && a.place && !seenAttractionNames.has(a.place.toLowerCase())) {
       seenAttractionNames.add(a.place.toLowerCase());
+      const amt = (a.cost && typeof a.cost.amount === 'number' && Number.isFinite(a.cost.amount)) ? a.cost.amount : null;
+      const est = a.cost?.dataStatus === 'estimate' || a.cost?.isEstimate === true;
       activityAttractions.push({
         name: a.place,
         rating: a.rating ?? null,
-        entryFee: { amount: a.cost?.amount || 0, currency: currency, isEstimate: a.cost?.isEstimate !== false },
-        entryFeeIsEstimate: a.cost?.isEstimate !== false,
-        entryFeeNote: a.cost?.isEstimate ? 'Estimated from itinerary' : 'From itinerary plan',
+        entryFee: { amount: amt, currency: currency, isEstimate: est, dataStatus: amt == null ? 'unavailable' : (est ? 'estimate' : 'live') },
+        entryFeeIsEstimate: est,
+        entryFeeNote: amt == null ? 'No provider entry-fee data — price unavailable' : (est ? 'Estimated from itinerary' : 'From itinerary plan'),
         timeRequired: null,
         distanceKm: null,
         distanceLabel: null,
@@ -1706,7 +1795,7 @@ export function buildItineraryExtras({
     priceCurrency: h.price?.currency || currency,
     distanceKm: hotelKm(h),
     address: h.address || '',
-    amenities: Array.isArray(h.amenities) && h.amenities.length ? h.amenities : ['Free Wi-Fi', 'AC', 'Breakfast included'],
+    amenities: Array.isArray(h.amenities) && h.amenities.length ? h.amenities.slice(0, 6) : [],
     isLive: hotelsLive && Boolean(h.name),
     source: hotelsLive ? 'amadeus-hotels' : 'estimate',
   }));
@@ -1718,7 +1807,7 @@ export function buildItineraryExtras({
       priceCurrency: hotelRecommended.price?.currency || currency,
       distanceKm: hotelKm(hotelRecommended),
       address: hotelRecommended.address || '',
-      amenities: Array.isArray(hotelRecommended.amenities) && hotelRecommended.amenities.length ? hotelRecommended.amenities : ['Free Wi-Fi', 'AC'],
+      amenities: Array.isArray(hotelRecommended.amenities) && hotelRecommended.amenities.length ? hotelRecommended.amenities.slice(0, 6) : [],
       isLive: hotelsLive,
       source: hotelsLive ? 'amadeus-hotels' : 'estimate',
       fetchedAt: new Date().toISOString(),
@@ -1733,19 +1822,25 @@ export function buildItineraryExtras({
   const restaurantList = Array.isArray(restaurantResult?.data?.restaurants) ? restaurantResult.data.restaurants : [];
   const restaurantsLive = restaurantResult?.data?.isLive === true;
   const restaurants = restaurantList.slice(0, 8).map((r) => {
-    const level = r.priceLevel ?? 1;
+    const level = r.priceLevel;
     const hasZomato = r.zomatoData && r.zomatoData.averageCostPerPerson > 0;
+    // A Google priceLevel is only a coarse 0-4 band. We may surface a clearly
+    // labelled statistical estimate when one exists; without a priceLevel (or
+    // Zomato) the price is unknown and must stay null — never a made-up ₹ amount.
+    const estimate = level != null ? (RESTAURANT_PRICE_BY_LEVEL[level] ?? null) : null;
     return {
       name: r.name || 'Restaurant',
       cuisine: (r.cuisines?.length ? r.cuisines : (r.types || []).filter((t) => t && t !== 'restaurant')).slice(0, 3).join(', ') || 'Local cuisine',
       rating: r.rating ?? null,
       reviewCount: r.reviewCount || r.zomatoData?.votes || null,
-      averageCost: hasZomato ? r.averageCostForTwo : (RESTAURANT_PRICE_BY_LEVEL[level] ?? 350),
-      averageCostPerPerson: hasZomato ? r.averageCostPerPerson : Math.round(RESTAURANT_PRICE_BY_LEVEL[level] ?? 350),
-      averageCostIsEstimate: !hasZomato,
+      averageCost: hasZomato ? r.averageCostForTwo : estimate,
+      averageCostPerPerson: hasZomato ? r.averageCostPerPerson : estimate,
+      averageCostIsEstimate: hasZomato ? false : estimate != null,
       averageCostNote: hasZomato
         ? `Real average from Zomato (${r.zomatoData.ratingText || 'rated'} ${r.zomatoData.rating ?? ''})`
-        : 'Estimated from Google Places priceLevel — actual menu prices not available from provider',
+        : estimate != null
+          ? 'Estimated from Google Places priceLevel — actual menu prices not available from provider'
+          : 'Price unavailable — no provider price data',
       veg: Boolean(prefs?.foodPreference && /veg|jain|vegan/i.test(prefs.foodPreference)),
       nonVeg: Boolean(prefs?.foodPreference && /non.?veg|chicken|meat|seafood/i.test(prefs.foodPreference)),
       vegan: Boolean(prefs?.foodPreference && /vegan|jain/i.test(prefs.foodPreference)),
@@ -1779,8 +1874,8 @@ export function buildItineraryExtras({
     name: a.name || `Attraction ${i + 1}`,
     rating: a.rating ?? null,
     entryFee: (a.entryFee && typeof a.entryFee.amount === 'number') ? a.entryFee : entryFeeEstimate(a, currency),
-    entryFeeIsEstimate: a.entryFee ? (a.entryFee.isEstimate !== false) : true,
-    entryFeeNote: a.entryFeeNote || (a.entryFee ? 'From itinerary plan' : 'Estimated — no live entry fee pricing available from Google provider'),
+    entryFeeIsEstimate: a.entryFee ? (a.entryFee.isEstimate !== false) : false,
+    entryFeeNote: a.entryFeeNote || (a.entryFee ? 'From itinerary plan' : 'No live entry fee pricing available from provider — price unavailable'),
     openingHours: a.openingHours || null,
     timeRequired: a.timeRequired || visitHoursEstimate(a),
     distanceKm: attractionKm(a),
@@ -1793,7 +1888,7 @@ export function buildItineraryExtras({
   const topAttractions = effectiveAttractionList.slice(0, 6).map(attractionCard);
   const nearbyAttractions = effectiveAttractionList.slice(0, 10).map(attractionCard);
   const hiddenGemsCards = hiddenGems
-    .map((g) => (typeof g === 'string' ? { name: g, rating: null, entryFee: { amount: 0, currency, isEstimate: true }, timeRequired: null, isLive: false } : attractionCard(g, 0)))
+    .map((g) => (typeof g === 'string' ? { name: g, rating: null, entryFee: { amount: null, currency, isEstimate: false }, timeRequired: null, isLive: false } : attractionCard(g, 0)))
     .slice(0, 4);
 
   /* ---- 6. Transport plan (mode-specific estimates) ---- */

@@ -34,17 +34,25 @@ test('buildDays produces a complete day-by-day skeleton with labelled data statu
   assert.ok(statuses.every((s) => ['live', 'estimate', 'unavailable'].includes(s)));
   assert.ok(day1.activities.some((a) => a.category === 'hotel'), 'day includes accommodation');
   assert.ok(day1.activities.some((a) => a.category === 'transport'), 'day includes transport');
-  // Unavailable items have honest pricing — no fabricated estimates
+  // Unavailable items have honest pricing — unknown is NOT an estimate and is
+  // never a fabricated ₹0. Only transport may carry a clearly labelled budget
+  // estimate (from the transport budget allocation).
   const unavail = day1.activities.filter((a) => a.dataStatus === 'unavailable');
   for (const a of unavail) {
     if (a.category === 'hotel') {
       assert.equal(a.cost.isEstimate, false, 'unavailable hotel is not an estimate — no fabricated price');
+      assert.equal(a.cost.amount, null, 'unavailable hotel has no fabricated ₹0 price');
     } else if (a.category === 'restaurant') {
       // Meal engine uses honest unavailability — no invented prices
       assert.equal(a.cost.isEstimate, false, 'unavailable restaurant has honest unavailability — no fabricated price');
+      assert.equal(a.cost.amount, null, 'unavailable restaurant has no fabricated ₹0 price');
+    } else if (a.category === 'transport' || a.category === 'flight' || a.category === 'train' || a.category === 'bus') {
+      // Transport may carry a clearly labelled budget estimate (no fake live fare)
+      assert.ok(a.cost.isEstimate === true || a.cost.amount == null, 'transport uses labelled estimates or honest unavailability');
     } else {
-      // Transport/other may still use estimates
-      assert.equal(a.cost.isEstimate, true, 'unavailable non-hotel non-restaurant items are estimates');
+      // Attraction/activity/night with no provider price: unknown ≠ estimate
+      assert.equal(a.cost.isEstimate, false, 'unavailable non-transport items are NOT estimates — price unknown, never fabricated');
+      assert.equal(a.cost.amount, null, 'unavailable non-transport items have no fabricated ₹0 price');
     }
   }
 });

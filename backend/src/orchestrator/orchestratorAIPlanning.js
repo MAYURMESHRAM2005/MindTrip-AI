@@ -40,6 +40,13 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
 
   // Attractions (from Google + Viator enrichment)
   for (const a of attractions || []) {
+    const entryFee = a.entryFee || null;
+    // A provider-reported fee of exactly ₹0 (not estimated) is a verified free
+    // entry. An absent fee or an estimated fee is UNKNOWN — never assume free.
+    const providerFree = Boolean(
+      entryFee && typeof entryFee.amount === 'number' && entryFee.amount === 0
+      && entryFee.isEstimate === false
+    );
     candidates.push({
       id: `google:${a.placeId || a.name}`,
       provider: 'google',
@@ -49,7 +56,8 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       description: (a.types || []).join(', '),
       latitude: a.coordinates?.lat || null,
       longitude: a.coordinates?.lng || null,
-      price: a.entryFee?.amount || 0,
+      price: entryFee && typeof entryFee.amount === 'number' ? entryFee.amount : null,
+      isFree: Boolean(a.entryFee?.isFree) || providerFree,
       currency: a.entryFee?.currency || 'INR',
       rating: a.rating || null,
       priceLevel: a.priceLevel || null,
@@ -63,7 +71,7 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       isEstimate: Boolean(a.entryFee?.isEstimate ?? true),
       // Preserve enriched fields
       viatorPricing: a.viatorPricing || null,
-      entryFee: a.entryFee || null,
+      entryFee: entryFee,
       types: a.types || [],
       address: a.address || '',
       suburb: a.suburb || '',
@@ -89,7 +97,7 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       description: (r.cuisine || []).join(', '),
       latitude: r.latitude,
       longitude: r.longitude,
-      price: r.averageCostPerPerson || 0,
+      price: r.averageCostPerPerson ?? null,
       currency: 'INR',
       rating: r.rating,
       priceLevel: r.priceLevel,
@@ -123,7 +131,8 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       description: (n.types || []).join(', '),
       latitude: n.coordinates?.lat || null,
       longitude: n.coordinates?.lng || null,
-      price: 0,
+      price: null,
+      isFree: Boolean(n.isFree),
       currency: 'INR',
       rating: n.rating || null,
       openingHours: null,
@@ -169,8 +178,8 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       description: h.address || '',
       latitude: h.latitude,
       longitude: h.longitude,
-      price: h.pricePerNight || 0,
-      pricePerNight: h.pricePerNight || 0,
+      price: h.pricePerNight ?? null,
+      pricePerNight: h.pricePerNight ?? null,
       currency: h.currency || 'INR',
       rating: h.rating,
       openingHours: null,
@@ -205,7 +214,7 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       description: `${transportResult.mode} from origin to destination`,
       latitude: null,
       longitude: null,
-      price: transportSelected.price?.amount || 0,
+      price: transportSelected.price?.amount ?? null,
       currency: transportSelected.price?.currency || 'INR',
       rating: null,
       openingHours: null,
@@ -230,7 +239,7 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       description: `Alternative ${offer.mode || 'transport'} option`,
       latitude: null,
       longitude: null,
-      price: offer.price?.amount || 0,
+      price: offer.price?.amount ?? null,
       currency: offer.price?.currency || 'INR',
       rating: null,
       openingHours: null,
@@ -255,7 +264,7 @@ export function normalizeCandidates({ attractions, restaurants, nightlife, hotel
       description: `${e.category || ''} ${e.genre || ''}`.trim(),
       latitude: e.venueLatitude || null,
       longitude: e.venueLongitude || null,
-      price: e.priceRange?.min || 0,
+      price: e.priceRange?.min ?? null,
       currency: e.priceRange?.currency || 'INR',
       rating: null,
       openingHours: null,
@@ -305,16 +314,16 @@ export function resolveProviderIds(aiDays, candidates) {
   const now = new Date().toISOString();
   const resolved = [];
   let resolvedCount = 0;
-  let unresolvedCount = 0;
-
-  for (const day of aiDays || []) {
+  let unresolvedCount = 0;    for (const day of aiDays || []) {
     const resolvedDay = {
-      dayNumber: resolved.length + 1,
+      dayNumber: day.dayNumber || (resolved.length + 1),
       date: day.date || '',
       theme: day.theme || '',
       area: day.theme || '',
       activities: [],
     };
+
+    const dayNumber = resolved.length + 1;
 
     for (const item of day.items || []) {
       let candidate = null;
@@ -332,6 +341,16 @@ export function resolveProviderIds(aiDays, candidates) {
       if (!candidate) {
         unresolvedCount++;
         logger.warn(`[AI-PLANNING] Could not resolve candidate for ${item.provider}:${item.providerId}`);
+        continue;
+      }
+
+      // Enforce day availability on the backend — never rely on the prompt alone.
+      // If a candidate carries _availableDays (day-aware pipeline output) and the
+      // current day is not in it, the candidate MUST NOT be scheduled today.
+      if (Array.isArray(candidate._availableDays) && candidate._availableDays.length > 0
+        && !candidate._availableDays.includes(dayNumber)) {
+        unresolvedCount++;
+        logger.warn(`[AI-PLANNING] Candidate ${candidate.provider}:${candidate.providerId} "${candidate.name}" not available on Day ${dayNumber} (available days: [${candidate._availableDays.join(', ')}]) — rejected by backend`);
         continue;
       }
 
@@ -404,9 +423,12 @@ function mapCategory(type, candidate) {
     flight: 'flight',
     train: 'train',
     bus: 'bus',
+    road: 'transport',
     activity: 'activity',
   };
-  return typeMap[type] || 'activity';
+  // Road trips (self-drive / cab) map to the DB's plain 'transport' category.
+  if (type === 'road') return 'transport';
+  return typeMap[type] || (candidate && candidate.isLive ? 'activity' : 'activity');
 }
 
 /** Map start time to a time slot label. */
@@ -484,7 +506,7 @@ function buildCostFromCandidate(candidate, type) {
     };
   }
 
-  // Attractions: entry fee from candidate
+  // Attractions: entry fee from candidate — unknown must stay null, never ₹0.
   if (type === 'attraction') {
     if (candidate.price > 0) {
       return {
@@ -492,10 +514,14 @@ function buildCostFromCandidate(candidate, type) {
         currency: candidate.currency || 'INR',
         isEstimate: Boolean(candidate.isEstimate),
         source: candidate.source || candidate.provider,
+        dataStatus: candidate.isEstimate ? 'estimate' : 'live',
         estimateNote: candidate.isEstimate ? `Estimated from ${candidate.provider}` : `Real price from ${candidate.provider}`,
       };
     }
-    return { amount: 0, currency: 'INR', isEstimate: true, source: 'estimate', estimateNote: 'Free / unknown entry fee' };
+    if (candidate.isFree) {
+      return { amount: 0, currency: 'INR', isEstimate: false, source: candidate.source || 'provider', dataStatus: 'live', estimateNote: 'Verified free entry' };
+    }
+    return { amount: null, currency: 'INR', isEstimate: false, source: 'unavailable', dataStatus: 'unavailable', estimateNote: 'Entry fee unknown — not fabricated' };
   }
 
   // Restaurants: average cost from candidate
@@ -529,7 +555,7 @@ function buildCostFromCandidate(candidate, type) {
     };
   }
 
-  // Events: price from candidate
+  // Events: price from candidate — unknown stays null, never ₹0.
   if (type === 'event') {
     if (candidate.price > 0) {
       return {
@@ -537,16 +563,24 @@ function buildCostFromCandidate(candidate, type) {
         currency: candidate.currency || 'INR',
         isEstimate: Boolean(candidate.isEstimate),
         source: candidate.source || candidate.provider,
+        dataStatus: candidate.isEstimate ? 'estimate' : 'live',
       };
     }
     if (candidate.isFree) {
-      return { amount: 0, currency: 'INR', isEstimate: false, source: 'ticketmaster' };
+      return { amount: 0, currency: 'INR', isEstimate: false, source: 'ticketmaster', dataStatus: 'live' };
     }
-    return { amount: 0, currency: 'INR', isEstimate: true, source: 'estimate' };
+    return { amount: null, currency: 'INR', isEstimate: false, source: 'unavailable', dataStatus: 'unavailable', estimateNote: 'Event price unknown — not fabricated' };
   }
 
-  // Nightlife: typically free or cover charge
-  return { amount: 0, currency: 'INR', isEstimate: true, source: 'estimate' };
+  // Nightlife: only ₹0 when the provider confirms it is free; otherwise unavailable.
+  if (type === 'nightlife') {
+    if (candidate.isFree) {
+      return { amount: 0, currency: 'INR', isEstimate: false, source: candidate.source || 'provider', dataStatus: 'live', estimateNote: 'Verified free entry' };
+    }
+    return { amount: null, currency: 'INR', isEstimate: false, source: 'unavailable', dataStatus: 'unavailable', estimateNote: 'Cover charge unknown — not fabricated' };
+  }
+
+  return { amount: null, currency: 'INR', isEstimate: false, source: 'unavailable', dataStatus: 'unavailable', estimateNote: 'Price unknown — not fabricated' };
 }
 
 // ══════════════════════════════════════════════════════════════════════

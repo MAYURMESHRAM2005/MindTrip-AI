@@ -193,7 +193,7 @@ export async function enrichRestaurants(destination, restaurantNames, { maxSearc
     );
 
     for (const settled of batchResults) {
-      if (settiled.status !== 'fulfilled') continue;
+      if (settled.status !== 'fulfilled') continue;
       const { name, result } = settled.value;
       if (!result.isLive || !result.data?.length) continue;
 

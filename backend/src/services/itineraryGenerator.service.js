@@ -775,7 +775,7 @@ ${JSON.stringify(context.trip, null, 2)}
 ${JSON.stringify(context.budget, null, 2)}
 
 ═══ CANDIDATES (select ONLY from this list) ═══
-Every item you include must reference a candidate by its "provider" and "providerId" fields.
+Every item you include must reference a candidate by its "candidateId" field — the EXACT candidateId string shown on the candidate (e.g. "google-chij-abc"). Do NOT use provider/providerId — responses without a valid candidateId are rejected.
 ${JSON.stringify(context.candidates, null, 2)}
 
 ═══ WEATHER ═══

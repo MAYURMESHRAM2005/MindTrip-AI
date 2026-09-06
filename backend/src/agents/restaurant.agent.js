@@ -16,12 +16,16 @@ class RestaurantAgent {
   get systemPrompt() { return this._systemPrompt; }
   set systemPrompt(v) { this._systemPrompt = v; }
 
-  async run({ destination, foodPreference }) {
-    logger.entry('[AGENT:restaurant]', 'run', { destination, foodPreference });
+  async run({ destination, foodPreference, lat = null, lng = null }) {
+    logger.entry('[AGENT:restaurant]', 'run', { destination, foodPreference, hasCoords: lat != null && lng != null });
     const started = Date.now();
+    // Use the destination coordinates as location bias so Google Places returns
+    // restaurants near the actual destination, never a same-named city elsewhere.
     const providerResult = await placesProvider.textSearch({
       query: `${destination} best restaurants`,
       type: 'restaurant',
+      lat,
+      lng,
       limit: 20,
     });
 

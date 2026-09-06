@@ -31,6 +31,7 @@ import { notifyTripPlanned, notifyBudgetOptimized } from '../services/notificati
 import destinationLock from '../services/destinationLock.service.js';
 import candidateQuality from '../services/candidateQuality.service.js';
 import restaurantPipeline from '../services/restaurantCandidatePipeline.service.js';
+import dayAwareProvider from '../services/dayAwareProvider.service.js';
 
 function fmtDate(d) {
   const date = new Date(d);
@@ -272,11 +273,11 @@ export async function generateTrip({ user, request }) {
       'hotel'
     ),
     runWithTimeout(
-      () => attractionAgent.run({ destination, interests: prefs.interests, activityLevel: prefs.activityLevel, userId }),
+      () => attractionAgent.run({ destination, interests: prefs.interests, activityLevel: prefs.activityLevel, lat: destLock?.latitude ?? null, lng: destLock?.longitude ?? null, userId }),
       'attraction'
     ),
     runWithTimeout(
-      () => restaurantAgent.run({ destination, foodPreference: prefs.foodPreference, userId }),
+      () => restaurantAgent.run({ destination, foodPreference: prefs.foodPreference, lat: destLock?.latitude ?? null, lng: destLock?.longitude ?? null, userId }),
       'restaurant'
     ),
     runWithTimeout(
@@ -671,6 +672,34 @@ export async function generateTrip({ user, request }) {
   report.push(budgetAgent.report(budgetResult));
   logger.agent('budget', 'run', { status: budgetResult.status, suggestions: budgetResult.data?.suggestions?.length || 0, risks: budgetResult.data?.risks?.length || 0 });
 
+  // ══════════════════════════════════════════════════════════════════════
+  // BATCH 4a: Enrich candidates with per-day availability (opening-hours aware)
+  // so the deterministic day builder + meal engine can ENFORCE it on the
+  // backend — never rely on prompts alone.
+  // ══════════════════════════════════════════════════════════════════════
+  let dayAwarePools = null;
+  try {
+    const tripDays = dayAwareProvider.generateTripDays(fmtDate(request.startDate), fmtDate(request.endDate));
+    const pools = dayAwareProvider.buildDaySpecificPools({
+      tripDays,
+      attractions: attractionResult?.data?.attractions || [],
+      restaurants: restaurantResult?.data?.restaurants || [],
+      events: [],
+      nightlife: nightlifeData,
+      weatherForecast: weatherResult?.data?.forecast || null,
+      prefs,
+    });
+    dayAwarePools = {
+      attractions: dayAwareProvider.enrichCandidatesWithDayAvailability(attractionResult?.data?.attractions || [], pools),
+      restaurants: dayAwareProvider.enrichCandidatesWithDayAvailability(restaurantResult?.data?.restaurants || [], pools),
+      nightlife: dayAwareProvider.enrichCandidatesWithDayAvailability(nightlifeData, pools),
+    };
+    logger.info('[ORCHESTRATOR] Day-availability enrichment complete for deterministic day builder');
+  } catch (err) {
+    logger.warn(`[ORCHESTRATOR] Day-availability enrichment failed (${err.message}) — deterministic builder will not enforce day availability`);
+    dayAwarePools = null;
+  }
+
   logger.info('[ORCHESTRATOR] ═══ BATCH 4b: Pre-fetch real routes for intra-day travel ═══');
   const routeCache = await prefetchActivityRoutes({
     attractions: attractionResult?.data?.attractions || [],
@@ -692,9 +721,9 @@ export async function generateTrip({ user, request }) {
     transportResult,
     returnTransportResult,
     weatherResult,
-    attractions: attractionResult?.data?.attractions || [],
-    restaurants: restaurantResult?.data?.restaurants || [],
-    nightlife: nightlifeData,
+    attractions: (dayAwarePools && dayAwarePools.attractions.length) ? dayAwarePools.attractions : (attractionResult?.data?.attractions || []),
+    restaurants: (dayAwarePools && dayAwarePools.restaurants.length) ? dayAwarePools.restaurants : (restaurantResult?.data?.restaurants || []),
+    nightlife: (dayAwarePools && dayAwarePools.nightlife.length) ? dayAwarePools.nightlife : nightlifeData,
     budgetAllocation: allocation,
     totalBudget,
     currency,
@@ -965,24 +994,47 @@ export async function generateTrip({ user, request }) {
   } catch (itinErr) {
     logger.warn(`[ORCHESTRATOR] Itinerary.create() failed: ${itinErr.message} — retrying with sanitized days`);
     // Sanitize days: strip any fields that might cause validation errors
+    // (a safety net only — it must never turn a live price into an estimate
+    // or hide a known price, so the status is derived from the activity).
     const safeDays = (finalDays || []).map((d) => ({
       dayNumber: d.dayNumber,
       date: d.date,
       area: String(d.area || ''),
-      activities: (d.activities || []).map((a) => ({
-        time: String(a.time || ''),
-        slot: String(a.slot || ''),
-        title: String(a.title || 'Activity'),
-        place: String(a.place || ''),
-        description: String(a.description || ''),
-        category: ['transport', 'flight', 'train', 'bus', 'hotel', 'restaurant', 'attraction', 'activity', 'nightlife', 'free', 'other'].includes(a.category) ? a.category : 'activity',
-        address: String(a.address || ''),
-        cost: { amount: Number(a.cost?.amount) || 0, currency: String(a.cost?.currency || 'INR'), isEstimate: Boolean(a.cost?.isEstimate ?? true) },
-        source: String(a.source || 'ai-generated'),
-        isLive: Boolean(a.isLive),
-        dataStatus: ['live', 'estimate', 'unavailable'].includes(a.dataStatus) ? a.dataStatus : 'estimate',
-        priority: Number(a.priority) || 1,
-      })),
+      activities: (d.activities || []).map((a) => {
+        // Map transport synonyms (e.g. 'road' from Transport Intelligence) to
+        // the DB's plain 'transport' category instead of discarding the item.
+        const cat = a.category || '';
+        const category = ['transport', 'flight', 'train', 'bus'].includes(cat) ? 'transport'
+          : ['hotel', 'restaurant', 'attraction', 'activity', 'nightlife', 'free', 'other'].includes(cat) ? cat
+            : 'activity';
+        const actStatus = ['live', 'estimate', 'unavailable'].includes(a.dataStatus) ? a.dataStatus
+          : (a.isLive ? 'live' : (a.cost?.isEstimate ? 'estimate' : 'unavailable'));
+        const costStatus = ['live', 'estimate', 'unavailable'].includes(a.cost?.dataStatus)
+          ? a.cost.dataStatus
+          : (a.cost?.amount != null
+            ? (actStatus === 'live' ? 'live' : (a.cost?.isEstimate || actStatus === 'estimate' ? 'estimate' : 'unavailable'))
+            : 'unavailable');
+        return {
+          time: String(a.time || ''),
+          slot: String(a.slot || ''),
+          title: String(a.title || 'Activity'),
+          place: String(a.place || ''),
+          description: String(a.description || ''),
+          category,
+          address: String(a.address || ''),
+          cost: {
+            amount: (a.cost && typeof a.cost.amount === 'number' && Number.isFinite(a.cost.amount)) ? a.cost.amount : null,
+            currency: String(a.cost?.currency || 'INR'),
+            isEstimate: costStatus === 'estimate',
+            dataStatus: costStatus,
+            source: String(a.cost?.source || ''),
+          },
+          source: String(a.source || 'ai-generated'),
+          isLive: Boolean(a.isLive),
+          dataStatus: actStatus,
+          priority: Number(a.priority) || 1,
+        };
+      }),
       dayCost: Number(d.dayCost) || 0,
     }));
     itinerary = await Itinerary.create({

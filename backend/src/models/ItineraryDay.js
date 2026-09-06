@@ -22,15 +22,19 @@ const activitySchema = new mongoose.Schema(
       lng: { type: Number },
     },
     travel: {
-      distanceKm: { type: Number, default: 0 },
-      durationMin: { type: Number, default: 0 },
+      // null means "no route data" — never convert unknown to 0 km / 0 min.
+      distanceKm: { type: Number },
+      durationMin: { type: Number },
       method: { type: String, default: 'walking' },
       isEstimate: { type: Boolean, default: true },
+      dataStatus: { type: String, enum: ['live', 'estimate', 'unavailable'], default: 'estimate' },
     },
     cost: {
-      amount: { type: Number, default: 0 },
+      // null means "price unknown" — a verified free item is the only valid 0.
+      amount: { type: Number },
       currency: { type: String, default: 'INR' },
-      isEstimate: { type: Boolean, default: true },
+      isEstimate: { type: Boolean, default: false },
+      dataStatus: { type: String, enum: ['live', 'estimate', 'unavailable'], default: 'unavailable' },
       perPerson: { type: Number },
       estimateNote: { type: String, default: '' },
     },
@@ -62,8 +66,9 @@ const itineraryDaySchema = new mongoose.Schema(
       area: { type: String, default: '' },
       rooms: { type: Number, default: 1 },
       nights: { type: Number, default: 0 },
-      pricePerRoomNight: { type: Number, default: 0 },
-      total: { type: Number, default: 0 },
+      // null = no provider offer (never show ₹0 for an unknown hotel rate).
+      pricePerRoomNight: { type: Number },
+      total: { type: Number },
       address: { type: String, default: '' },
       rating: { type: Number },
       amenities: { type: [String], default: [] },

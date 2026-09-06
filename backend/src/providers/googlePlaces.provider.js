@@ -403,7 +403,15 @@ export async function textSearch({ query, lat, lng, radius = 5000, type = 'touri
   const q = String(query || '').trim();
   if (!q) return unavailable(SOURCE, 'Places search requires a query');
 
-  const cacheKey = searchCacheKey('text', { query: q, type, limit });
+  // Include the location bias in the cache key: the same free-text query asked
+  // near different coordinates must never reuse results cached for another city.
+  const cacheKey = searchCacheKey('text', {
+    query: q,
+    type,
+    limit,
+    lat: lat != null && !Number.isNaN(Number(lat)) ? Number(lat).toFixed(5) : null,
+    lng: lng != null && !Number.isNaN(Number(lng)) ? Number(lng).toFixed(5) : null,
+  });
   const cached = getCachedSearch(cacheKey);
   if (cached) {
     logger.provider(SOURCE, 'textSearch (cached)', { isLive: true, count: cached.length, latencyMs: Date.now() - started });

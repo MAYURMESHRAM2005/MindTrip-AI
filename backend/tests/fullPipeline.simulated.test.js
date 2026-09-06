@@ -432,16 +432,38 @@ test('simulated full pipeline: real Google data → normalized → destination-l
     // ── Cost / data-status invariants ────────────────────────────────────
     const allowedStatuses = new Set(['live', 'estimate', 'estimated', 'unavailable']);
     for (const a of flat) {
-      assert.ok(a.cost && typeof a.cost.amount === 'number' && a.cost.amount >= 0, `activity "${a.title}" must have numeric cost.amount ≥ 0`);
+      assert.ok(a.cost, `activity "${a.title}" must have a cost object`);
       assert.ok(typeof a.cost.isEstimate === 'boolean', `activity "${a.title}" must have boolean isEstimate`);
       const st = a.dataStatus || a.cost.dataStatus || '';
       assert.ok(allowedStatuses.has(st), `activity "${a.title}" has invalid dataStatus "${st}"`);
-      // A "live" PRICE must not be 0 and un-estimated: ₹0 with no estimate
-      // flag would masquerade an unknown price as free. (A live place whose
-      // price is unavailable is represented by cost.dataStatus
-      // 'unavailable' — that is honest "Price unavailable", not free.)
-      if (a.cost.dataStatus === 'live') {
-        assert.ok(a.cost.amount > 0 || a.cost.isEstimate, `live-priced activity "${a.title}" must not show amount 0 without an estimate flag`);
+      const priceStatus = a.cost.dataStatus || st;
+      const isTransport = ['transport', 'flight', 'train', 'bus'].includes(a.category);
+
+      if (priceStatus === 'unavailable') {
+        // Honest unavailability: no fabricated ₹0. Transport may carry a
+        // clearly labelled budget estimate, everything else is null.
+        if (isTransport) {
+          assert.ok(
+            a.cost.amount == null || (a.cost.isEstimate === true && a.cost.amount > 0),
+            `unavailable transport "${a.title}" must have a labelled estimate or null price — never bare ₹0`
+          );
+        } else {
+          assert.equal(a.cost.amount, null, `unavailable activity "${a.title}" must have null amount — never ₹0`);
+          assert.equal(a.cost.isEstimate, false, `unavailable activity "${a.title}" must not be labelled an estimate`);
+        }
+      } else {
+        assert.ok(typeof a.cost.amount === 'number' && a.cost.amount >= 0, `activity "${a.title}" (${priceStatus}) must have numeric cost.amount ≥ 0`);
+        // A "live" PRICE must not be a bare ₹0: zero is only valid for a
+        // verified free item (isFree) or a clearly labelled estimate.
+        if (priceStatus === 'live') {
+          assert.ok(
+            a.cost.amount > 0 || a.cost.isFree === true || a.cost.isEstimate === true,
+            `live-priced activity "${a.title}" must not show amount 0 unless verified free (isFree) or estimated`
+          );
+        }
+        if (priceStatus === 'estimate' || priceStatus === 'estimated') {
+          assert.equal(a.cost.isEstimate, true, `estimated activity "${a.title}" must carry isEstimate=true`);
+        }
       }
     }
 

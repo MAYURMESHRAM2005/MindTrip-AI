@@ -199,16 +199,18 @@ export async function resolveDestination(destination, opts = {}) {
   const metro = METRO_AREAS[metroKey] || null;
   const radiusKm = opts.radiusKm || metro?.radiusKm || DEFAULT_RADIUS_KM;
 
-  // Build city/state/country from the formatted address
+  // Build city/state/country from the geocoder's structured address
+  // components first (authoritative), falling back to formatted-address parsing.
   const addressParts = parseFormattedAddress(address || '');
+  const city = geo.data.city || addressParts.city || metroKey;
 
   return {
     name: destination,
     normalizedName,
-    city: addressParts.city || metroKey,
+    city,
     cityNormalized: metroKey,
-    state: addressParts.state || '',
-    country: addressParts.country || '',
+    state: geo.data.state || addressParts.state || '',
+    country: geo.data.country || addressParts.country || '',
     latitude: lat,
     longitude: lng,
     radiusKm,

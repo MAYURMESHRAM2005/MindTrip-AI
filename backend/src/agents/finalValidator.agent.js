@@ -1255,6 +1255,7 @@ class FinalValidatorAgent {
   }
 
   _validateDataIntegrity(days, issues) {
+    const VALID_PRICE_TYPES = new Set(['live', 'cached', 'estimate', 'free', 'unknown']);
     for (const day of days || []) {
       for (const act of day.activities || []) {
         if (act.isLive === true && act.dataStatus === 'unavailable') {
@@ -1263,6 +1264,35 @@ class FinalValidatorAgent {
             day.dayNumber,
             act.providerId || null,
             `"${act.title}" is marked isLive=true but dataStatus=unavailable — contradiction.`
+          ));
+        }
+        // Validate priceType is a valid value
+        if (act.priceType && !VALID_PRICE_TYPES.has(act.priceType)) {
+          issues.push(createValidationError(
+            ERROR_TYPES.DATA_INTEGRITY,
+            day.dayNumber,
+            act.providerId || null,
+            `"${act.title}" has invalid priceType: "${act.priceType}". Must be one of: live, cached, estimate, free, unknown.`
+          ));
+        }
+        // Validate: free items must have isFree=true and amount=0 or null
+        if (act.priceType === 'free') {
+          if (act.cost?.amount != null && act.cost.amount > 0) {
+            issues.push(createValidationError(
+              ERROR_TYPES.DATA_INTEGRITY,
+              day.dayNumber,
+              act.providerId || null,
+              `"${act.title}" has priceType=free but cost amount is ${act.cost.amount} — contradiction.`
+            ));
+          }
+        }
+        // Validate: live prices should not be marked as estimates
+        if (act.priceType === 'live' && act.cost?.isEstimate === true) {
+          issues.push(createValidationError(
+            ERROR_TYPES.DATA_INTEGRITY,
+            day.dayNumber,
+            act.providerId || null,
+            `"${act.title}" has priceType=live but cost.isEstimate=true — contradiction.`
           ));
         }
       }
@@ -1293,7 +1323,9 @@ class FinalValidatorAgent {
       budget,
       currency: currency || 'INR',
       allowedRadiusKm: destLock?.radiusKm || 50,
-      destCentroid: destCentroid || destLock?.centroid || null,
+      destCentroid: destCentroid || (destLock?.latitude != null && destLock?.longitude != null
+        ? { lat: destLock.latitude, lng: destLock.longitude }
+        : null),
       partySize: partySize || 1,
     });
 
@@ -1323,7 +1355,9 @@ class FinalValidatorAgent {
           budget,
           currency: currency || 'INR',
           allowedRadiusKm: destLock?.radiusKm || 50,
-          destCentroid: destCentroid || destLock?.centroid || null,
+          destCentroid: destCentroid || (destLock?.latitude != null && destLock?.longitude != null
+            ? { lat: destLock.latitude, lng: destLock.longitude }
+            : null),
           partySize: partySize || 1,
         });
         if (recheckResult.passed) {

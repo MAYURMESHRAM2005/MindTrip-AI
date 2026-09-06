@@ -37,7 +37,7 @@ function Row({ row, total, currency }) {
 export default function BudgetPlanningCard({ planning, currency }) {
   const { t } = useI18n();
   if (!planning) return null;
-  const { rows = [], totalBudget, totalEstimatedCost, remainingBudget, allocatedTotal, optimized, budgetUsedPct, withinBudget } = planning;
+  const { rows = [], totalBudget, totalEstimatedCost, remainingBudget, allocatedTotal, optimized, budgetUsedPct, withinBudget, unavailableItems = 0 } = planning;
   const remaining = remainingBudget ?? totalBudget - totalEstimatedCost;
   const within = withinBudget ?? remaining >= 0;
   const saved = optimized?.saved || 0;
@@ -98,6 +98,11 @@ export default function BudgetPlanningCard({ planning, currency }) {
         )}
         {!within && (
           <span className="inline-flex items-center gap-1 font-semibold text-rose-500"><AlertTriangle className="h-3.5 w-3.5" /> {t('Use “Optimize budget” to fit')}</span>
+        )}
+        {unavailableItems > 0 && (
+          <span className="inline-flex items-center gap-1 font-semibold text-slate-400">
+            <AlertTriangle className="h-3.5 w-3.5" /> {unavailableItems} {t('item(s) with price unavailable — not included as ₹0')}
+          </span>
         )}
       </div>
     </Card>

@@ -33,9 +33,13 @@ export const NEARBY_CATEGORIES = [
   { key: 'transit_station', label: 'Transit stations', color: '#14b8a6', categories: 'public_transport' },
 ];
 
-/** Keys are stored server-side only — the backend owns all Google Places calls. */
+/**
+ * Whether the interactive Maps JavaScript API browser key is present.
+ * All Places/geocoding/routes go through the backend, but the map itself only
+ * renders when VITE_GOOGLE_MAPS_BROWSER_KEY is set (see MapView).
+ */
 export function googleConfigured() {
-  return true;
+  return Boolean(import.meta.env.VITE_GOOGLE_MAPS_BROWSER_KEY);
 }
 
 function errMessage(err, fallback) {

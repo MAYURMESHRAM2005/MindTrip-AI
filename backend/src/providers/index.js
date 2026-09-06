@@ -31,7 +31,11 @@ export function providerStatuses() {
   return [
     { name: 'Gemini AI', configured: Boolean(env.GEMINI_API_KEY), kind: 'ai' },
     { name: 'Groq AI (Fallback)', configured: Boolean(env.GROQ_API_KEY), kind: 'ai' },
-    { name: 'Google Maps JavaScript API', configured: mapsConfigured, kind: 'maps', api: 'Google Maps Platform' },
+    // The Maps JavaScript API runs in the BROWSER with a separate referrer-
+    // restricted key (VITE_GOOGLE_MAPS_BROWSER_KEY) that the backend cannot see.
+    // It must never be reported as configured just because the server key exists
+    // — the Admin page checks the frontend env var and overrides this entry.
+    { name: 'Google Maps JavaScript API', configured: false, kind: 'maps', api: 'Maps JavaScript API (browser)', frontendCheck: true, message: 'Uses frontend VITE_GOOGLE_MAPS_BROWSER_KEY — verified in the browser' },
     { name: 'Google Geocoding API', configured: mapsConfigured, kind: 'maps', api: 'Google Maps Platform' },
     { name: 'Google Places API', configured: mapsConfigured, kind: 'maps', api: 'Google Maps Platform' },
     { name: 'Google Routes API', configured: mapsConfigured, kind: 'maps', api: 'Google Maps Platform' },

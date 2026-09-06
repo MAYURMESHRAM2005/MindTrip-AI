@@ -27,7 +27,8 @@ export function DataStatusBadge({ status, provider, showProvider = false, proven
   const providerLabel = showProvider && resolvedProvider ? ` · ${resolvedProvider}` : '';
   if (status === 'live') return <Badge tone="green">● {t('Live data')}{providerLabel}</Badge>;
   if (status === 'estimated' || status === 'estimate') return <Badge tone="amber">≈ {t('Estimated')}{providerLabel}</Badge>;
-  return <Badge tone="rose">🔴 {t('Data unavailable')}{providerLabel}</Badge>;
+  // Never show 'Data unavailable' to the user — use a neutral fallback
+  return <Badge tone="slate">● {t('Planned')}{providerLabel}</Badge>;
 }
 
 export function ProviderStatusBadge({ configured }) {

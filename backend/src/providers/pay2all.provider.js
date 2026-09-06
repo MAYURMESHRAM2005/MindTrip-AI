@@ -130,7 +130,7 @@ export async function bookSeats({ tripId, boardingId, droppingId, email, mobile,
     const result = {
       success: res.status_id === 1,
       pnr: res.data?.pnr || null,
-      amount: res.data?.amount || 0,
+      amount: res.data?.amount ?? null,
       currency: res.data?.currency || 'INR',
       seats: res.data?.seats || [],
       message: res.message,

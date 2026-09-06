@@ -16,12 +16,16 @@ class AttractionAgent {
   get systemPrompt() { return this._systemPrompt; }
   set systemPrompt(v) { this._systemPrompt = v; }
 
-  async run({ destination, interests, activityLevel }) {
-    logger.entry('[AGENT:attraction]', 'run', { destination, interests, activityLevel });
+  async run({ destination, interests, activityLevel, lat = null, lng = null }) {
+    logger.entry('[AGENT:attraction]', 'run', { destination, interests, activityLevel, hasCoords: lat != null && lng != null });
     const started = Date.now();
+    // Use the destination coordinates as location bias so Google Places returns
+    // places near the actual destination, never a same-named city elsewhere.
     const providerResult = await placesProvider.textSearch({
       query: `${destination} top tourist attractions`,
       type: 'tourist_attraction',
+      lat,
+      lng,
       limit: 30,
     });
 

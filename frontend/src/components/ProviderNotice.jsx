@@ -16,7 +16,7 @@ export default function ProviderNotice({ message, externalSources = [], title, a
           <WifiOff className="h-4 w-4" />
         </div>
         <div className="min-w-0">
-          <p className="font-bold text-amber-800 dark:text-amber-300">{title || t('Live data unavailable')}</p>
+          <p className="font-bold text-amber-800 dark:text-amber-300">{title || t('Some live data unavailable')}</p>
           <p className="mt-0.5 text-amber-700/90 dark:text-amber-200/80">{message}</p>
           {externalSources?.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-2">
